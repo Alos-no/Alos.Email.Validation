@@ -1,5 +1,7 @@
 namespace Alos.Email.Validation.Tests;
 
+using Configuration;
+using Microsoft.Extensions.Options;
 using Moq;
 
 /// <summary>
@@ -7,31 +9,231 @@ using Moq;
 /// </summary>
 public class EmailValidationServiceTests
 {
+  #region Properties & Fields - Non-Public
+
   private readonly Mock<IDisposableEmailDomainChecker> _disposableChecker;
   private readonly Mock<IMxRecordValidator> _mxValidator;
+  private readonly EmailValidationOptions _options;
   private readonly IEmailValidationService _service;
 
+  #endregion
+
+
+  #region Constructors
 
   public EmailValidationServiceTests()
   {
     _disposableChecker = new Mock<IDisposableEmailDomainChecker>();
     _mxValidator = new Mock<IMxRecordValidator>();
+    _options = new EmailValidationOptions();
 
     // Default: not disposable, has MX records
     _disposableChecker.Setup(c => c.IsDisposable(It.IsAny<string>())).Returns(false);
     _mxValidator.Setup(v => v.HasValidMxRecordsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
       .ReturnsAsync(true);
 
-    _service = new EmailValidationService(_disposableChecker.Object, _mxValidator.Object);
+    _service = CreateService();
   }
 
 
-  #region ValidateAsync Tests
+  /// <summary>
+  ///   Creates a service instance with the current options.
+  /// </summary>
+  private EmailValidationService CreateService()
+  {
+    return new EmailValidationService(
+      _disposableChecker.Object,
+      _mxValidator.Object,
+      Options.Create(_options));
+  }
+
+
+  /// <summary>
+  ///   Creates a service instance with custom options.
+  /// </summary>
+  private EmailValidationService CreateServiceWithOptions(EmailValidationOptions options)
+  {
+    return new EmailValidationService(
+      _disposableChecker.Object,
+      _mxValidator.Object,
+      Options.Create(options));
+  }
+
+  #endregion
+
+
+  #region ValidateFormat Tests
+
+  /// <summary>
+  ///   Tests valid email formats per HTML5 Living Standard specification.
+  ///   Source: https://html.spec.whatwg.org/multipage/input.html#valid-e-mail-address
+  /// </summary>
+  [Theory]
+  // Basic valid formats
+  [InlineData("john@gmail.com")]
+  [InlineData("john.doe@example.com")]
+  [InlineData("john+tag@gmail.com")]
+  [InlineData("john.doe+tag@sub.example.com")]
+  [InlineData("user@localhost")]
+  [InlineData("a@b.c")]
+  [InlineData("user123@domain123.com")]
+  [InlineData("user.name@domain.co.uk")]
+  // Numeric domains
+  [InlineData("user@123.com")]
+  [InlineData("user@domain1.domain2.com")]
+  // Special characters allowed in local part per HTML5 spec (atext chars)
+  [InlineData("user!test@example.com")]
+  [InlineData("user#test@example.com")]
+  [InlineData("user$test@example.com")]
+  [InlineData("user%test@example.com")]
+  [InlineData("user&test@example.com")]
+  [InlineData("user'test@example.com")]
+  [InlineData("user*test@example.com")]
+  [InlineData("user+test@example.com")]
+  [InlineData("user/test@example.com")]
+  [InlineData("user=test@example.com")]
+  [InlineData("user?test@example.com")]
+  [InlineData("user^test@example.com")]
+  [InlineData("user_test@example.com")]
+  [InlineData("user`test@example.com")]
+  [InlineData("user{test@example.com")]
+  [InlineData("user|test@example.com")]
+  [InlineData("user}test@example.com")]
+  [InlineData("user~test@example.com")]
+  [InlineData("user-test@example.com")]
+  // Combined special characters
+  [InlineData("user!#$%&'*+/=?^_`{|}~-test@example.com")]
+  // Dots in local part
+  [InlineData("first.last@example.com")]
+  [InlineData("first.middle.last@example.com")]
+  // Single character local part
+  [InlineData("a@example.com")]
+  // Long but valid local part (up to 64 chars is valid per RFC)
+  [InlineData("abcdefghijklmnopqrstuvwxyz1234567890@example.com")]
+  // Subdomains
+  [InlineData("user@sub.domain.example.com")]
+  [InlineData("user@a.b.c.d.e.f.example.com")]
+  // TLD variations
+  [InlineData("user@example.co")]
+  [InlineData("user@example.io")]
+  [InlineData("user@example.museum")]
+  // HTML5 spec allows these (willful violation of RFC 5322) - dots at start/end and consecutive dots
+  // Most email providers reject these, but the HTML5 browser pattern accepts them.
+  // We use HTML5 spec for broad compatibility; MX validation will catch truly invalid domains.
+  [InlineData(".user@domain.com")]
+  [InlineData("user.@domain.com")]
+  [InlineData(".user.@domain.com")]
+  [InlineData("user..name@domain.com")]
+  [InlineData("user...name@domain.com")]
+  public void ValidateFormat_ValidEmails_ReturnsTrue(string email)
+  {
+    var result = _service.ValidateFormat(email);
+
+    result.Should().BeTrue($"'{email}' should be a valid email format per HTML5 spec");
+  }
+
+
+  /// <summary>
+  ///   Tests invalid email formats per HTML5 Living Standard specification.
+  /// </summary>
+  [Theory]
+  // Empty/whitespace
+  [InlineData("")]
+  [InlineData("   ")]
+  [InlineData("\t")]
+  [InlineData("\n")]
+  // Missing @ symbol
+  [InlineData("notanemail")]
+  [InlineData("plainaddress")]
+  [InlineData("missing.at.sign.com")]
+  // Missing parts
+  [InlineData("@missing.local")]
+  [InlineData("missing@")]
+  [InlineData("@")]
+  [InlineData("@@")]
+  // Multiple @ symbols
+  [InlineData("user@@domain.com")]
+  [InlineData("user@domain@domain.com")]
+  [InlineData("a@b@c@d.com")]
+  // Invalid domain formats
+  [InlineData("missing@.com")]
+  [InlineData("user@domain..com")]
+  [InlineData("user@.domain.com")]
+  [InlineData("user@domain.com.")]
+  [InlineData("user@-domain.com")]
+  [InlineData("user@domain-.com")]
+  [InlineData("user@-domain-.com")]
+  // Domain label starting/ending with hyphen
+  [InlineData("user@sub.-domain.com")]
+  [InlineData("user@sub.domain-.com")]
+  // Spaces (not allowed)
+  [InlineData("user @domain.com")]
+  [InlineData("user@ domain.com")]
+  [InlineData("user@domain .com")]
+  [InlineData(" user@domain.com")]
+  [InlineData("user@domain.com ")]
+  [InlineData("user name@domain.com")]
+  // Characters not allowed in local part per HTML5 (outside atext)
+  [InlineData("user(comment)@domain.com")]
+  [InlineData("user)test@domain.com")]
+  [InlineData("user<test@domain.com")]
+  [InlineData("user>test@domain.com")]
+  [InlineData("user[test@domain.com")]
+  [InlineData("user]test@domain.com")]
+  [InlineData("user:test@domain.com")]
+  [InlineData("user;test@domain.com")]
+  [InlineData("user,test@domain.com")]
+  [InlineData("user\\test@domain.com")]
+  [InlineData("\"user\"@domain.com")]
+  public void ValidateFormat_InvalidEmails_ReturnsFalse(string email)
+  {
+    var result = _service.ValidateFormat(email);
+
+    result.Should().BeFalse($"'{email}' should be an invalid email format");
+  }
+
+
+  /// <summary>
+  ///   Tests null input handling.
+  /// </summary>
+  [Fact]
+  public void ValidateFormat_NullEmail_ReturnsFalse()
+  {
+    var result = _service.ValidateFormat(null!);
+
+    result.Should().BeFalse();
+  }
+
+
+  /// <summary>
+  ///   Tests edge cases for email format validation.
+  /// </summary>
+  [Theory]
+  // Maximum local part length edge cases (64 chars max per RFC 5321)
+  [InlineData("a@b.c", true)] // Minimum valid
+  [InlineData("1@2.3", true)] // Numeric minimum
+  // International-looking but ASCII domains
+  [InlineData("user@xn--n3h.com", true)] // Punycode domain (valid ASCII)
+  // Numbers in all positions
+  [InlineData("123@456.789", true)]
+  [InlineData("1user@domain.com", true)]
+  [InlineData("user1@1domain.com", true)]
+  public void ValidateFormat_EdgeCases_ReturnsExpected(string email, bool expected)
+  {
+    var result = _service.ValidateFormat(email);
+
+    result.Should().Be(expected, $"'{email}' validation result should be {expected}");
+  }
+
+  #endregion
+
+
+  #region ValidateEmailAsync Tests
 
   [Fact]
-  public async Task ValidateAsync_ValidEmail_ReturnsSuccess()
+  public async Task ValidateEmailAsync_ValidEmail_ReturnsSuccess()
   {
-    var result = await _service.ValidateAsync("john@gmail.com");
+    var result = await _service.ValidateEmailAsync("john@gmail.com");
 
     result.IsValid.Should().BeTrue();
     result.Error.Should().BeNull();
@@ -42,9 +244,9 @@ public class EmailValidationServiceTests
   [InlineData("notanemail")]
   [InlineData("@missing.local")]
   [InlineData("")]
-  public async Task ValidateAsync_InvalidFormat_ReturnsInvalidFormat(string email)
+  public async Task ValidateEmailAsync_InvalidFormat_ReturnsInvalidFormat(string email)
   {
-    var result = await _service.ValidateAsync(email);
+    var result = await _service.ValidateEmailAsync(email);
 
     result.IsValid.Should().BeFalse();
     result.Error.Should().Be(EmailValidationError.InvalidFormat);
@@ -55,9 +257,9 @@ public class EmailValidationServiceTests
   [InlineData("alias@duck.com")]
   [InlineData("alias@mozmail.com")]
   [InlineData("alias@privaterelay.appleid.com")]
-  public async Task ValidateAsync_RelayService_ReturnsRelayServiceError(string email)
+  public async Task ValidateEmailAsync_RelayService_ReturnsRelayServiceError(string email)
   {
-    var result = await _service.ValidateAsync(email);
+    var result = await _service.ValidateEmailAsync(email);
 
     result.IsValid.Should().BeFalse();
     result.Error.Should().Be(EmailValidationError.RelayService);
@@ -65,11 +267,11 @@ public class EmailValidationServiceTests
 
 
   [Fact]
-  public async Task ValidateAsync_DisposableDomain_ReturnsDisposableError()
+  public async Task ValidateEmailAsync_DisposableDomain_ReturnsDisposableError()
   {
     _disposableChecker.Setup(c => c.IsDisposable("mailinator.com")).Returns(true);
 
-    var result = await _service.ValidateAsync("test@mailinator.com");
+    var result = await _service.ValidateEmailAsync("test@mailinator.com");
 
     result.IsValid.Should().BeFalse();
     result.Error.Should().Be(EmailValidationError.Disposable);
@@ -77,15 +279,181 @@ public class EmailValidationServiceTests
 
 
   [Fact]
-  public async Task ValidateAsync_NoMxRecords_ReturnsInvalidDomainError()
+  public async Task ValidateEmailAsync_NoMxRecords_ReturnsInvalidDomainError()
   {
     _mxValidator.Setup(v => v.HasValidMxRecordsAsync("invalid.invalid", It.IsAny<CancellationToken>()))
       .ReturnsAsync(false);
 
-    var result = await _service.ValidateAsync("test@invalid.invalid");
+    var result = await _service.ValidateEmailAsync("test@invalid.invalid");
 
     result.IsValid.Should().BeFalse();
     result.Error.Should().Be(EmailValidationError.InvalidDomain);
+  }
+
+
+  [Fact]
+  public async Task ValidateEmailAsync_WhitelistedMxDomain_SkipsMxCheck()
+  {
+    // Arrange: Create service with whitelisted domain.
+    var options = new EmailValidationOptions
+    {
+      WhitelistedMxDomains = ["test.local"]
+    };
+    var service = CreateServiceWithOptions(options);
+
+    // Act: Validate an email with the whitelisted domain.
+    var result = await service.ValidateEmailAsync("user@test.local");
+
+    // Assert: Should succeed without MX check.
+    result.IsValid.Should().BeTrue();
+
+    // MX validator should NOT be called for whitelisted domain.
+    _mxValidator.Verify(
+      v => v.HasValidMxRecordsAsync("test.local", It.IsAny<CancellationToken>()),
+      Times.Never,
+      "MX check should be skipped for whitelisted domains");
+  }
+
+
+  [Fact]
+  public async Task ValidateEmailAsync_WhitelistedMxDomain_StillChecksOtherValidation()
+  {
+    // Arrange: Create service with whitelisted domain that is also disposable.
+    var options = new EmailValidationOptions
+    {
+      WhitelistedMxDomains = ["tempmail.com"]
+    };
+    var service = CreateServiceWithOptions(options);
+    _disposableChecker.Setup(c => c.IsDisposable("tempmail.com")).Returns(true);
+
+    // Act: Validate an email with the whitelisted (but disposable) domain.
+    var result = await service.ValidateEmailAsync("user@tempmail.com");
+
+    // Assert: Should fail with Disposable error - MX whitelist doesn't bypass other checks.
+    result.IsValid.Should().BeFalse();
+    result.Error.Should().Be(EmailValidationError.Disposable);
+  }
+
+  #endregion
+
+
+  #region ValidateMxAsync Tests
+
+  [Fact]
+  public async Task ValidateMxAsync_ValidMxRecords_ReturnsSuccess()
+  {
+    _mxValidator.Setup(v => v.HasValidMxRecordsAsync("example.com", It.IsAny<CancellationToken>()))
+      .ReturnsAsync(true);
+
+    var result = await _service.ValidateMxAsync("user@example.com");
+
+    result.IsValid.Should().BeTrue();
+    result.Error.Should().BeNull();
+  }
+
+
+  [Fact]
+  public async Task ValidateMxAsync_NoMxRecords_ReturnsInvalidDomain()
+  {
+    _mxValidator.Setup(v => v.HasValidMxRecordsAsync("invalid.invalid", It.IsAny<CancellationToken>()))
+      .ReturnsAsync(false);
+
+    var result = await _service.ValidateMxAsync("user@invalid.invalid");
+
+    result.IsValid.Should().BeFalse();
+    result.Error.Should().Be(EmailValidationError.InvalidDomain);
+  }
+
+
+  [Fact]
+  public async Task ValidateMxAsync_NullDomain_ReturnsInvalidFormat()
+  {
+    // When domain extraction fails (null/empty email), should return InvalidFormat.
+    var result = await _service.ValidateMxAsync("notanemail");
+
+    result.IsValid.Should().BeFalse();
+    result.Error.Should().Be(EmailValidationError.InvalidFormat);
+  }
+
+
+  [Fact]
+  public async Task ValidateMxAsync_WhitelistedDomain_SkipsMxCheck()
+  {
+    // Arrange: Create service with whitelisted domain.
+    var options = new EmailValidationOptions
+    {
+      WhitelistedMxDomains = ["test.local", "itest.alos.local"]
+    };
+    var service = CreateServiceWithOptions(options);
+
+    // Act: Validate an email with the whitelisted domain.
+    var result = await service.ValidateMxAsync("user@itest.alos.local");
+
+    // Assert: Should succeed without MX check.
+    result.IsValid.Should().BeTrue();
+
+    // MX validator should NOT be called for whitelisted domain.
+    _mxValidator.Verify(
+      v => v.HasValidMxRecordsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+      Times.Never,
+      "MX check should be skipped for whitelisted domains");
+  }
+
+
+  [Fact]
+  public async Task ValidateMxAsync_WhitelistIsCaseInsensitive()
+  {
+    // Arrange: Create service with whitelisted domain in mixed case.
+    var options = new EmailValidationOptions
+    {
+      WhitelistedMxDomains = ["TEST.Local"]
+    };
+    var service = CreateServiceWithOptions(options);
+
+    // Act: Validate an email with lowercase domain.
+    var result = await service.ValidateMxAsync("user@test.local");
+
+    // Assert: Should succeed - whitelist should be case-insensitive.
+    result.IsValid.Should().BeTrue();
+    _mxValidator.Verify(
+      v => v.HasValidMxRecordsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+      Times.Never);
+  }
+
+
+  [Fact]
+  public async Task ValidateMxAsync_DoesNotCheckRelayOrDisposable()
+  {
+    // ValidateMxAsync should ONLY check MX records, not relay or disposable.
+    _disposableChecker.Setup(c => c.IsDisposable("mailinator.com")).Returns(true);
+
+    var result = await _service.ValidateMxAsync("user@mailinator.com");
+
+    // Should succeed (MX check passes) even though domain is disposable.
+    result.IsValid.Should().BeTrue();
+
+    // Disposable checker should NOT be called by ValidateMxAsync.
+    _disposableChecker.Verify(
+      c => c.IsDisposable(It.IsAny<string>()),
+      Times.Never,
+      "ValidateMxAsync should not check disposable domains");
+  }
+
+
+  [Fact]
+  public async Task ValidateMxAsync_CancellationToken_PassedToMxValidator()
+  {
+    using var cts = new CancellationTokenSource();
+    var capturedToken = CancellationToken.None;
+
+    _mxValidator
+      .Setup(v => v.HasValidMxRecordsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+      .Callback<string, CancellationToken>((_, ct) => capturedToken = ct)
+      .ReturnsAsync(true);
+
+    await _service.ValidateMxAsync("test@example.com", cts.Token);
+
+    capturedToken.Should().Be(cts.Token);
   }
 
   #endregion
@@ -143,12 +511,10 @@ public class EmailValidationServiceTests
   #region Null Input Tests
 
   [Fact]
-  public async Task ValidateAsync_NullEmail_ReturnsInvalidFormat()
+  public async Task ValidateEmailAsync_NullEmail_ReturnsInvalidFormat()
   {
-    // Act
-    var result = await _service.ValidateAsync(null!);
+    var result = await _service.ValidateEmailAsync(null!);
 
-    // Assert: Should return InvalidFormat, not throw NullReferenceException.
     result.IsValid.Should().BeFalse();
     result.Error.Should().Be(EmailValidationError.InvalidFormat);
   }
@@ -157,10 +523,8 @@ public class EmailValidationServiceTests
   [Fact]
   public void IsRelayService_NullEmail_ReturnsFalse()
   {
-    // Act
     var result = _service.IsRelayService(null!);
 
-    // Assert: Should return false, not throw.
     result.Should().BeFalse();
   }
 
@@ -168,10 +532,8 @@ public class EmailValidationServiceTests
   [Fact]
   public void IsDisposable_NullEmail_ReturnsFalse()
   {
-    // Act
     var result = _service.IsDisposable(null!);
 
-    // Assert: Should return false, not throw.
     result.Should().BeFalse();
   }
 
@@ -179,10 +541,8 @@ public class EmailValidationServiceTests
   [Fact]
   public void Normalize_NullEmail_ReturnsNull()
   {
-    // Act
     var result = _service.Normalize(null!);
 
-    // Assert: Should return null, not throw.
     result.Should().BeNull();
   }
 
@@ -192,9 +552,8 @@ public class EmailValidationServiceTests
   #region CancellationToken Tests
 
   [Fact]
-  public async Task ValidateAsync_CancellationToken_PassedToMxValidator()
+  public async Task ValidateEmailAsync_CancellationToken_PassedToMxValidator()
   {
-    // Arrange
     using var cts = new CancellationTokenSource();
     var capturedToken = CancellationToken.None;
 
@@ -203,18 +562,15 @@ public class EmailValidationServiceTests
       .Callback<string, CancellationToken>((_, ct) => capturedToken = ct)
       .ReturnsAsync(true);
 
-    // Act
-    await _service.ValidateAsync("test@example.com", cts.Token);
+    await _service.ValidateEmailAsync("test@example.com", cts.Token);
 
-    // Assert: The token should have been forwarded to the MX validator.
     capturedToken.Should().Be(cts.Token);
   }
 
 
   [Fact]
-  public async Task ValidateAsync_CancellationRequested_PropagatesException()
+  public async Task ValidateEmailAsync_CancellationRequested_PropagatesException()
   {
-    // Arrange
     using var cts = new CancellationTokenSource();
     cts.Cancel();
 
@@ -222,9 +578,8 @@ public class EmailValidationServiceTests
       .Setup(v => v.HasValidMxRecordsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
       .ThrowsAsync(new OperationCanceledException());
 
-    // Act & Assert: Should propagate OperationCanceledException.
     await FluentActions
-      .Invoking(() => _service.ValidateAsync("test@example.com", cts.Token))
+      .Invoking(() => _service.ValidateEmailAsync("test@example.com", cts.Token))
       .Should().ThrowAsync<OperationCanceledException>();
   }
 
@@ -242,22 +597,20 @@ public class EmailValidationServiceTests
   [InlineData("@missing.local")]
   [InlineData("")]
   [InlineData("   ")]
-  public async Task ValidateAsync_InvalidFormat_DoesNotCheckRelayOrDisposableOrMx(string email)
+  public async Task ValidateEmailAsync_InvalidFormat_DoesNotCheckRelayOrDisposableOrMx(string email)
   {
-    // Act
-    var result = await _service.ValidateAsync(email);
+    var result = await _service.ValidateEmailAsync(email);
 
-    // Assert: Should return InvalidFormat error.
     result.IsValid.Should().BeFalse();
     result.Error.Should().Be(EmailValidationError.InvalidFormat);
 
-    // Assert: Disposable checker should NOT be called (format check short-circuits).
+    // Disposable checker should NOT be called (format check short-circuits).
     _disposableChecker.Verify(
       c => c.IsDisposable(It.IsAny<string>()),
       Times.Never,
       "disposable check should not be called when format is invalid");
 
-    // Assert: MX validator should NOT be called (format check short-circuits).
+    // MX validator should NOT be called (format check short-circuits).
     _mxValidator.Verify(
       v => v.HasValidMxRecordsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
       Times.Never,
@@ -273,26 +626,23 @@ public class EmailValidationServiceTests
   [InlineData("alias@duck.com")]
   [InlineData("alias@mozmail.com")]
   [InlineData("alias@privaterelay.appleid.com")]
-  public async Task ValidateAsync_RelayService_DoesNotCheckDisposableOrMx(string email)
+  public async Task ValidateEmailAsync_RelayService_DoesNotCheckDisposableOrMx(string email)
   {
-    // Arrange: Set up disposable checker to track if it's called.
     // Even if the domain were disposable, we should never check.
     _disposableChecker.Setup(c => c.IsDisposable(It.IsAny<string>())).Returns(true);
 
-    // Act
-    var result = await _service.ValidateAsync(email);
+    var result = await _service.ValidateEmailAsync(email);
 
-    // Assert: Should return RelayService error.
     result.IsValid.Should().BeFalse();
     result.Error.Should().Be(EmailValidationError.RelayService);
 
-    // Assert: Disposable checker should NOT be called (relay check short-circuits).
+    // Disposable checker should NOT be called (relay check short-circuits).
     _disposableChecker.Verify(
       c => c.IsDisposable(It.IsAny<string>()),
       Times.Never,
       "disposable check should not be called for relay services");
 
-    // Assert: MX validator should NOT be called (relay check short-circuits).
+    // MX validator should NOT be called (relay check short-circuits).
     _mxValidator.Verify(
       v => v.HasValidMxRecordsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
       Times.Never,
@@ -305,19 +655,16 @@ public class EmailValidationServiceTests
   ///   When email is disposable, MX check should NOT be invoked (saves DNS query).
   /// </summary>
   [Fact]
-  public async Task ValidateAsync_DisposableDomain_DoesNotCheckMx()
+  public async Task ValidateEmailAsync_DisposableDomain_DoesNotCheckMx()
   {
-    // Arrange: Set up domain as disposable.
     _disposableChecker.Setup(c => c.IsDisposable("tempmail.com")).Returns(true);
 
-    // Act
-    var result = await _service.ValidateAsync("user@tempmail.com");
+    var result = await _service.ValidateEmailAsync("user@tempmail.com");
 
-    // Assert: Should return Disposable error.
     result.IsValid.Should().BeFalse();
     result.Error.Should().Be(EmailValidationError.Disposable);
 
-    // Assert: MX validator should NOT be called (disposable check short-circuits).
+    // MX validator should NOT be called (disposable check short-circuits).
     _mxValidator.Verify(
       v => v.HasValidMxRecordsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
       Times.Never,
@@ -330,20 +677,17 @@ public class EmailValidationServiceTests
   ///   If email passes format, relay, and disposable checks, MX is checked.
   /// </summary>
   [Fact]
-  public async Task ValidateAsync_ValidEmailPassesAllChecks_ChecksMxLast()
+  public async Task ValidateEmailAsync_ValidEmailPassesAllChecks_ChecksMxLast()
   {
-    // Arrange: All checks pass.
     _disposableChecker.Setup(c => c.IsDisposable("example.com")).Returns(false);
     _mxValidator.Setup(v => v.HasValidMxRecordsAsync("example.com", It.IsAny<CancellationToken>()))
       .ReturnsAsync(true);
 
-    // Act
-    var result = await _service.ValidateAsync("user@example.com");
+    var result = await _service.ValidateEmailAsync("user@example.com");
 
-    // Assert: Should succeed.
     result.IsValid.Should().BeTrue();
 
-    // Assert: All checks were invoked in order.
+    // All checks were invoked in order.
     _disposableChecker.Verify(c => c.IsDisposable("example.com"), Times.Once);
     _mxValidator.Verify(v => v.HasValidMxRecordsAsync("example.com", It.IsAny<CancellationToken>()), Times.Once);
   }
@@ -354,21 +698,20 @@ public class EmailValidationServiceTests
   ///   Order: InvalidFormat > RelayService > Disposable > InvalidDomain
   /// </summary>
   [Fact]
-  public async Task ValidateAsync_EmailFailsMultipleChecks_ReturnsFirstError()
+  public async Task ValidateEmailAsync_EmailFailsMultipleChecks_ReturnsFirstError()
   {
-    // Arrange: Domain would fail both disposable and MX checks.
+    // Domain would fail both disposable and MX checks.
     _disposableChecker.Setup(c => c.IsDisposable("bad-domain.invalid")).Returns(true);
     _mxValidator.Setup(v => v.HasValidMxRecordsAsync("bad-domain.invalid", It.IsAny<CancellationToken>()))
       .ReturnsAsync(false);
 
-    // Act
-    var result = await _service.ValidateAsync("user@bad-domain.invalid");
+    var result = await _service.ValidateEmailAsync("user@bad-domain.invalid");
 
-    // Assert: Should return Disposable error (checked before MX).
+    // Should return Disposable error (checked before MX).
     result.IsValid.Should().BeFalse();
     result.Error.Should().Be(EmailValidationError.Disposable);
 
-    // Assert: MX validator should NOT be called due to short-circuiting.
+    // MX validator should NOT be called due to short-circuiting.
     _mxValidator.Verify(
       v => v.HasValidMxRecordsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
       Times.Never);
@@ -379,33 +722,33 @@ public class EmailValidationServiceTests
   ///   Validates the complete validation order with a domain that would fail all checks.
   /// </summary>
   [Fact]
-  public async Task ValidateAsync_ValidationOrderIsFormatThenRelayThenDisposableThenMx()
+  public async Task ValidateEmailAsync_ValidationOrderIsFormatThenRelayThenDisposableThenMx()
   {
     // Test 1: Invalid format stops immediately.
-    var formatResult = await _service.ValidateAsync("invalid");
+    var formatResult = await _service.ValidateEmailAsync("invalid");
     formatResult.Error.Should().Be(EmailValidationError.InvalidFormat);
 
     // Test 2: Valid format but relay service stops at relay check.
-    var relayResult = await _service.ValidateAsync("test@duck.com");
+    var relayResult = await _service.ValidateEmailAsync("test@duck.com");
     relayResult.Error.Should().Be(EmailValidationError.RelayService);
 
     // Test 3: Valid format, not relay, but disposable stops at disposable check.
     _disposableChecker.Setup(c => c.IsDisposable("mailinator.com")).Returns(true);
-    var disposableResult = await _service.ValidateAsync("test@mailinator.com");
+    var disposableResult = await _service.ValidateEmailAsync("test@mailinator.com");
     disposableResult.Error.Should().Be(EmailValidationError.Disposable);
 
     // Test 4: Valid format, not relay, not disposable, but no MX stops at MX check.
     _disposableChecker.Setup(c => c.IsDisposable("no-mx.invalid")).Returns(false);
     _mxValidator.Setup(v => v.HasValidMxRecordsAsync("no-mx.invalid", It.IsAny<CancellationToken>()))
       .ReturnsAsync(false);
-    var mxResult = await _service.ValidateAsync("test@no-mx.invalid");
+    var mxResult = await _service.ValidateEmailAsync("test@no-mx.invalid");
     mxResult.Error.Should().Be(EmailValidationError.InvalidDomain);
 
     // Test 5: All checks pass.
     _disposableChecker.Setup(c => c.IsDisposable("valid.com")).Returns(false);
     _mxValidator.Setup(v => v.HasValidMxRecordsAsync("valid.com", It.IsAny<CancellationToken>()))
       .ReturnsAsync(true);
-    var validResult = await _service.ValidateAsync("test@valid.com");
+    var validResult = await _service.ValidateEmailAsync("test@valid.com");
     validResult.IsValid.Should().BeTrue();
   }
 
@@ -414,9 +757,8 @@ public class EmailValidationServiceTests
   ///   Validates that the domain extraction is done once and passed to all checks.
   /// </summary>
   [Fact]
-  public async Task ValidateAsync_ExtractsDomainOnce_PassesToAllChecks()
+  public async Task ValidateEmailAsync_ExtractsDomainOnce_PassesToAllChecks()
   {
-    // Arrange: Track the domain passed to each check.
     string? domainPassedToDisposable = null;
     string? domainPassedToMx = null;
 
@@ -430,10 +772,9 @@ public class EmailValidationServiceTests
       .Callback<string, CancellationToken>((d, _) => domainPassedToMx = d)
       .ReturnsAsync(true);
 
-    // Act
-    await _service.ValidateAsync("User.Name+Tag@EXAMPLE.COM");
+    await _service.ValidateEmailAsync("User.Name+Tag@EXAMPLE.COM");
 
-    // Assert: Both checks received the same extracted domain (lowercase).
+    // Both checks received the same extracted domain (lowercase).
     domainPassedToDisposable.Should().Be("example.com");
     domainPassedToMx.Should().Be("example.com");
   }
@@ -444,16 +785,14 @@ public class EmailValidationServiceTests
   #region ObjectDisposedException Propagation Tests
 
   [Fact]
-  public async Task ValidateAsync_DisposedChecker_PropagatesObjectDisposedException()
+  public async Task ValidateEmailAsync_DisposedChecker_PropagatesObjectDisposedException()
   {
-    // Arrange: Simulate a disposed checker.
     _disposableChecker
       .Setup(c => c.IsDisposable(It.IsAny<string>()))
       .Throws(new ObjectDisposedException(nameof(DisposableEmailDomainChecker)));
 
-    // Act & Assert: ObjectDisposedException should propagate up.
     await FluentActions
-      .Invoking(() => _service.ValidateAsync("test@example.com"))
+      .Invoking(() => _service.ValidateEmailAsync("test@example.com"))
       .Should().ThrowAsync<ObjectDisposedException>()
       .WithMessage("*DisposableEmailDomainChecker*");
   }
@@ -462,12 +801,10 @@ public class EmailValidationServiceTests
   [Fact]
   public void IsDisposable_DisposedChecker_PropagatesObjectDisposedException()
   {
-    // Arrange: Simulate a disposed checker.
     _disposableChecker
       .Setup(c => c.IsDisposable(It.IsAny<string>()))
       .Throws(new ObjectDisposedException(nameof(DisposableEmailDomainChecker)));
 
-    // Act & Assert: ObjectDisposedException should propagate up.
     FluentActions
       .Invoking(() => _service.IsDisposable("test@example.com"))
       .Should().Throw<ObjectDisposedException>()

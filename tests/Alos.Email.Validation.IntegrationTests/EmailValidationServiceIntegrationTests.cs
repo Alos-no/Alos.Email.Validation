@@ -30,7 +30,7 @@ public sealed class EmailValidationServiceIntegrationTests : IDisposable
   #region Tests - End-to-End Validation
 
   [Fact]
-  public async Task ValidateAsync_EndToEnd_WithRealDependencies()
+  public async Task ValidateEmailAsync_EndToEnd_WithRealDependencies()
   {
     // Arrange: Build full service container with real implementations.
     var services = new ServiceCollection();
@@ -44,7 +44,7 @@ public sealed class EmailValidationServiceIntegrationTests : IDisposable
     // Note: This test uses gmail.com which should have real MX records.
     // However, in CI environments, DNS might be restricted, so we verify
     // the service works without exceptions rather than specific results.
-    var result = await validationService.ValidateAsync("test@gmail.com");
+    var result = await validationService.ValidateEmailAsync("test@gmail.com");
 
     // The result should be one of the valid outcomes (not throw).
     result.Should().NotBeNull();
@@ -58,7 +58,7 @@ public sealed class EmailValidationServiceIntegrationTests : IDisposable
 
 
   [Fact]
-  public async Task ValidateAsync_EndToEnd_DisposableEmail_Rejected()
+  public async Task ValidateEmailAsync_EndToEnd_DisposableEmail_Rejected()
   {
     // Arrange
     var services = new ServiceCollection();
@@ -69,7 +69,7 @@ public sealed class EmailValidationServiceIntegrationTests : IDisposable
     var validationService = provider.GetRequiredService<IEmailValidationService>();
 
     // Act
-    var result = await validationService.ValidateAsync("test@mailinator.com");
+    var result = await validationService.ValidateEmailAsync("test@mailinator.com");
 
     // Assert: Should be rejected as disposable (before MX check).
     result.IsValid.Should().BeFalse();
@@ -78,7 +78,7 @@ public sealed class EmailValidationServiceIntegrationTests : IDisposable
 
 
   [Fact]
-  public async Task ValidateAsync_EndToEnd_RelayService_Rejected()
+  public async Task ValidateEmailAsync_EndToEnd_RelayService_Rejected()
   {
     // Arrange
     var services = new ServiceCollection();
@@ -89,7 +89,7 @@ public sealed class EmailValidationServiceIntegrationTests : IDisposable
     var validationService = provider.GetRequiredService<IEmailValidationService>();
 
     // Act
-    var result = await validationService.ValidateAsync("test@duck.com");
+    var result = await validationService.ValidateEmailAsync("test@duck.com");
 
     // Assert: Should be rejected as relay service (before disposable check).
     result.IsValid.Should().BeFalse();
@@ -98,7 +98,7 @@ public sealed class EmailValidationServiceIntegrationTests : IDisposable
 
 
   [Fact]
-  public async Task ValidateAsync_EndToEnd_InvalidFormat_Rejected()
+  public async Task ValidateEmailAsync_EndToEnd_InvalidFormat_Rejected()
   {
     // Arrange
     var services = new ServiceCollection();
@@ -109,7 +109,7 @@ public sealed class EmailValidationServiceIntegrationTests : IDisposable
     var validationService = provider.GetRequiredService<IEmailValidationService>();
 
     // Act
-    var result = await validationService.ValidateAsync("invalid-email-format");
+    var result = await validationService.ValidateEmailAsync("invalid-email-format");
 
     // Assert: Should be rejected for invalid format.
     result.IsValid.Should().BeFalse();
@@ -122,7 +122,7 @@ public sealed class EmailValidationServiceIntegrationTests : IDisposable
   #region Tests - End-to-End with Custom Lists
 
   [Fact]
-  public async Task ValidateAsync_EndToEnd_InlineCustomLists_Applied()
+  public async Task ValidateEmailAsync_EndToEnd_InlineCustomLists_Applied()
   {
     // Arrange: Configure with inline custom blocklist and allowlist.
     var services = new ServiceCollection();
@@ -137,12 +137,12 @@ public sealed class EmailValidationServiceIntegrationTests : IDisposable
     var validationService = provider.GetRequiredService<IEmailValidationService>();
 
     // Act & Assert: Custom blocked domain.
-    var blockedResult = await validationService.ValidateAsync("test@custom-blocked-for-test.com");
+    var blockedResult = await validationService.ValidateEmailAsync("test@custom-blocked-for-test.com");
     blockedResult.IsValid.Should().BeFalse();
     blockedResult.Error.Should().Be(EmailValidationError.Disposable);
 
     // Act & Assert: Custom allowlisted domain (normally blocked).
-    var allowedResult = await validationService.ValidateAsync("test@mailinator.com");
+    var allowedResult = await validationService.ValidateEmailAsync("test@mailinator.com");
 
     // Note: mailinator.com is on the allowlist, so it won't be rejected as disposable.
     // However, it might still fail MX validation in some environments.
@@ -151,7 +151,7 @@ public sealed class EmailValidationServiceIntegrationTests : IDisposable
 
 
   [Fact]
-  public async Task ValidateAsync_EndToEnd_CustomBlocklistFilesFromDirectory_Applied()
+  public async Task ValidateEmailAsync_EndToEnd_CustomBlocklistFilesFromDirectory_Applied()
   {
     // Arrange: Create custom list files in the BlocklistDirectory using naming conventions.
     var blocklistDir = _fixture.CreateSubdirectory("e2e-custom-files");
@@ -181,12 +181,12 @@ public sealed class EmailValidationServiceIntegrationTests : IDisposable
     var validationService = provider.GetRequiredService<IEmailValidationService>();
 
     // Act & Assert: Domain from custom blocklist file should be blocked.
-    var blockedResult = await validationService.ValidateAsync("test@e2e-blocked-domain.com");
+    var blockedResult = await validationService.ValidateEmailAsync("test@e2e-blocked-domain.com");
     blockedResult.IsValid.Should().BeFalse();
     blockedResult.Error.Should().Be(EmailValidationError.Disposable);
 
     // Act & Assert: Domain from custom allowlist file (override primary blocklist).
-    var allowedResult = await validationService.ValidateAsync("test@primary-blocked.com");
+    var allowedResult = await validationService.ValidateEmailAsync("test@primary-blocked.com");
     allowedResult.Error.Should().NotBe(EmailValidationError.Disposable);
   }
 

@@ -12,7 +12,8 @@ namespace Alos.Email.Validation.Configuration;
 ///       "CustomBlocklist": ["spammer.com", "badactor.net"],
 ///       "CustomAllowlist": ["legitimate-service.com"],
 ///       "CustomBlocklistUrls": ["https://example.com/my-blocklist.txt"],
-///       "CustomAllowlistUrls": ["https://example.com/my-allowlist.txt"]
+///       "CustomAllowlistUrls": ["https://example.com/my-allowlist.txt"],
+///       "WhitelistedMxDomains": ["itest.alos.local", "internal.corp.local"]
 ///     }
 ///   }
 ///   </code>
@@ -157,6 +158,21 @@ public sealed class EmailValidationOptions
   ///   </para>
   /// </remarks>
   public List<string> CustomAllowlist { get; set; } = [];
+
+  /// <summary>
+  ///   Gets or sets domains that bypass MX record validation.
+  /// </summary>
+  /// <remarks>
+  ///   <para>
+  ///     Domains in this list skip DNS MX record verification but still undergo all other
+  ///     validation checks (format, relay service, disposable domain).
+  ///   </para>
+  ///   <para>
+  ///     Use this for test domains (e.g., <c>itest.alos.local</c>) or internal domains
+  ///     that may not have public MX records but should still be accepted.
+  ///   </para>
+  /// </remarks>
+  public List<string> WhitelistedMxDomains { get; set; } = [];
 
   #endregion
 }
