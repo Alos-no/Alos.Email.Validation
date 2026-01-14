@@ -337,7 +337,7 @@ dotnet test tests/Alos.Email.Validation.IntegrationTests/
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) file for details.
+Apache License 2.0 - See [LICENSE](LICENSE) file for details.
 
 ## Credits
 
