@@ -51,7 +51,7 @@ foreach (var email in testEmails)
   Console.WriteLine($"  Is Relay Service: {service.IsRelayService(email)}");
   Console.WriteLine($"  Is Disposable: {service.IsDisposable(email)}");
 
-  var result = await service.ValidateAsync(email);
+  var result = await service.ValidateEmailAsync(email);
   Console.WriteLine($"  Validation Result: {(result.IsValid ? "Valid" : $"Invalid ({result.Error})")}");
   Console.WriteLine();
 }
