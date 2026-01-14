@@ -58,7 +58,7 @@ jobs:
 
       - name: Restore dependencies
         # Restore is required even with --no-build so the test runner can locate packages
-        run: dotnet restore Alos.Email.Validation.sln
+        run: dotnet restore Alos.Email.Validation.slnx
 
       - name: Run Unit Tests
         # Run unit tests for the primary target framework (net10.0)

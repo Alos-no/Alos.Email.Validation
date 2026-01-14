@@ -101,12 +101,12 @@ jobs:
           name: build-output-Release
 
       - name: Restore dependencies
-        run: dotnet restore Alos.Email.Validation.sln
+        run: dotnet restore Alos.Email.Validation.slnx
 
       - name: Create NuGet packages
         # Pack all projects that produce NuGet packages
         # The version is determined by the <Version> property in each .csproj file
-        run: dotnet pack Alos.Email.Validation.sln --configuration Release --no-build --output ./artifacts
+        run: dotnet pack Alos.Email.Validation.slnx --configuration Release --no-build --output ./artifacts
 
       - name: List generated packages
         # Display the packages that were created for verification

@@ -74,11 +74,11 @@ jobs:
             10.0.x
 
       - name: Restore dependencies
-        run: dotnet restore Alos.Email.Validation.sln
+        run: dotnet restore Alos.Email.Validation.slnx
 
       - name: Build solution
         # Build the entire solution with the specified configuration
-        run: dotnet build Alos.Email.Validation.sln --configuration ${{ inputs.configuration }} --no-restore
+        run: dotnet build Alos.Email.Validation.slnx --configuration ${{ inputs.configuration }} --no-restore
 
       - name: Upload build artifacts
         # Upload the build output for downstream jobs to consume
