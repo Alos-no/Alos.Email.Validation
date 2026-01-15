@@ -77,9 +77,73 @@ public class EmailNormalizerTests
 
   [Theory]
   [InlineData("john+spam@protonmail.com", "john@protonmail.com")]
+  [InlineData("john+spam@protonmail.ch", "john@protonmail.ch")]
   [InlineData("john+spam@proton.me", "john@proton.me")]
   [InlineData("john+spam@pm.me", "john@pm.me")]
   public void Normalize_ProtonMail_RemovesPlusSuffix(string input, string expected)
+  {
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john.doe@protonmail.com", "johndoe@protonmail.com")]
+  [InlineData("j.o.h.n@proton.me", "john@proton.me")]
+  [InlineData("first.last@pm.me", "firstlast@pm.me")]
+  public void Normalize_ProtonMail_RemovesDots(string input, string expected)
+  {
+    // ProtonMail ignores dots as a security measure against impersonation
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john-doe@protonmail.com", "johndoe@protonmail.com")]
+  [InlineData("first-middle-last@proton.me", "firstmiddlelast@proton.me")]
+  [InlineData("user-name@pm.me", "username@pm.me")]
+  public void Normalize_ProtonMail_RemovesHyphens(string input, string expected)
+  {
+    // ProtonMail ignores hyphens as a security measure against impersonation
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john_doe@protonmail.com", "johndoe@protonmail.com")]
+  [InlineData("first_middle_last@proton.me", "firstmiddlelast@proton.me")]
+  [InlineData("user_name@pm.me", "username@pm.me")]
+  public void Normalize_ProtonMail_RemovesUnderscores(string input, string expected)
+  {
+    // ProtonMail ignores underscores as a security measure against impersonation
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("j.o-h_n+spam@protonmail.com", "john@protonmail.com")]
+  [InlineData("first.middle-last_name+tag@proton.me", "firstmiddlelastname@proton.me")]
+  [InlineData("a.b-c_d+e@pm.me", "abcd@pm.me")]
+  public void Normalize_ProtonMail_RemovesAllIgnoredCharacters(string input, string expected)
+  {
+    // ProtonMail ignores dots, hyphens, underscores, and +suffix
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("JOHN.DOE@PROTONMAIL.COM", "johndoe@protonmail.com")]
+  [InlineData("John-Doe@Proton.Me", "johndoe@proton.me")]
+  public void Normalize_ProtonMail_LowercasesAndNormalizes(string input, string expected)
   {
     var result = EmailNormalizer.Normalize(input);
 
@@ -105,15 +169,26 @@ public class EmailNormalizerTests
   #endregion
 
 
-  #region Yahoo Tests
+  #region Yandex Tests
 
   [Theory]
-  [InlineData("john@yahoo.com", "john@yahoo.com")]
-  [InlineData("john.doe@yahoo.com", "john.doe@yahoo.com")]
-  [InlineData("john-alias@yahoo.com", "john-alias@yahoo.com")]
-  public void Normalize_Yahoo_NoNormalization(string input, string expected)
+  [InlineData("john+spam@yandex.com", "john@yandex.com")]
+  [InlineData("john+spam@yandex.ru", "john@yandex.ru")]
+  [InlineData("john+spam@ya.ru", "john@ya.ru")]
+  [InlineData("john+tag@yandex.fr", "john@yandex.fr")]
+  public void Normalize_Yandex_RemovesPlusSuffix(string input, string expected)
   {
-    // Yahoo base names are pre-created, not spontaneous aliases
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john.doe@yandex.com", "john.doe@yandex.com")]
+  public void Normalize_Yandex_PreservesDots(string input, string expected)
+  {
+    // Dots are significant in Yandex
     var result = EmailNormalizer.Normalize(input);
 
     result.Should().Be(expected);
@@ -122,13 +197,116 @@ public class EmailNormalizerTests
   #endregion
 
 
-  #region Other Providers Tests
+  #region GMX/mail.com Tests
 
   [Theory]
-  [InlineData("john@company.com", "john@company.com")]
-  [InlineData("john.doe@example.org", "john.doe@example.org")]
-  [InlineData("john+tag@custom-domain.io", "john+tag@custom-domain.io")]
-  public void Normalize_UnknownProvider_LowercaseOnly(string input, string expected)
+  [InlineData("john+spam@gmx.com", "john@gmx.com")]
+  [InlineData("john+spam@gmx.de", "john@gmx.de")]
+  [InlineData("john+spam@gmx.net", "john@gmx.net")]
+  [InlineData("john+tag@mail.com", "john@mail.com")]
+  [InlineData("john+tag@email.com", "john@email.com")]
+  [InlineData("john+tag@usa.com", "john@usa.com")]
+  public void Normalize_GmxMailCom_RemovesPlusSuffix(string input, string expected)
+  {
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+  #endregion
+
+
+  #region Other Known Plus-Addressing Providers Tests
+
+  [Theory]
+  [InlineData("john+spam@runbox.com", "john@runbox.com")]
+  [InlineData("john+spam@mailfence.com", "john@mailfence.com")]
+  [InlineData("john+spam@rambler.ru", "john@rambler.ru")]
+  [InlineData("john+spam@rackspace.com", "john@rackspace.com")]
+  public void Normalize_OtherKnownProviders_RemovesPlusSuffix(string input, string expected)
+  {
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+  #endregion
+
+
+  #region AOL Tests (No Plus Addressing Support)
+
+  [Theory]
+  [InlineData("john@aol.com", "john@aol.com")]
+  [InlineData("john@aim.com", "john@aim.com")]
+  public void Normalize_AOL_LowercasesOnly(string input, string expected)
+  {
+    // AOL does not reliably support plus addressing
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john+tag@aol.com", "john+tag@aol.com")]
+  [InlineData("john+spam@aim.com", "john+spam@aim.com")]
+  public void Normalize_AOL_PreservesPlusSuffix(string input, string expected)
+  {
+    // AOL doesn't reliably support plus addressing, so +suffix is preserved
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+  #endregion
+
+
+  #region Yahoo Tests
+
+  [Theory]
+  [InlineData("john-shopping@yahoo.com", "john@yahoo.com")]
+  [InlineData("john-newsletter@yahoo.com", "john@yahoo.com")]
+  [InlineData("user-keyword@ymail.com", "user@ymail.com")]
+  [InlineData("user-keyword@rocketmail.com", "user@rocketmail.com")]
+  public void Normalize_Yahoo_RemovesHyphenSuffix(string input, string expected)
+  {
+    // Yahoo uses hyphen-based aliases (nickname-keyword@yahoo.com)
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john@yahoo.com", "john@yahoo.com")]
+  [InlineData("john.doe@yahoo.com", "john.doe@yahoo.com")]
+  public void Normalize_Yahoo_PreservesDots(string input, string expected)
+  {
+    // Dots are significant in Yahoo (unlike Gmail)
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john+tag@yahoo.com", "john+tag@yahoo.com")]
+  [InlineData("user+spam@ymail.com", "user+spam@ymail.com")]
+  public void Normalize_Yahoo_PreservesPlusSuffix(string input, string expected)
+  {
+    // Yahoo doesn't use plus addressing, so +suffix is preserved
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john@yahoo.co.uk", "john@yahoo.co.uk")]
+  [InlineData("john-tag@yahoo.fr", "john@yahoo.fr")]
+  [InlineData("john-tag@yahoo.de", "john@yahoo.de")]
+  [InlineData("john-tag@yahoo.co.jp", "john@yahoo.co.jp")]
+  public void Normalize_Yahoo_InternationalDomains(string input, string expected)
   {
     var result = EmailNormalizer.Normalize(input);
 
@@ -137,11 +315,295 @@ public class EmailNormalizerTests
 
 
   [Fact]
-  public void Normalize_UnknownProvider_PreservesCase()
+  public void Normalize_Yahoo_HyphenAtStart_Preserved()
   {
-    var result = EmailNormalizer.Normalize("JOHN@EXAMPLE.COM");
+    // Edge case: username starts with hyphen (should not strip)
+    var result = EmailNormalizer.Normalize("-john@yahoo.com");
 
-    result.Should().Be("john@example.com");
+    result.Should().Be("-john@yahoo.com");
+  }
+
+  #endregion
+
+
+  #region Fastmail Tests
+
+  [Theory]
+  [InlineData("john+tag@fastmail.com", "john@fastmail.com")]
+  [InlineData("john+spam@fastmail.fm", "john@fastmail.fm")]
+  [InlineData("user+newsletter@fastmail.com", "user@fastmail.com")]
+  public void Normalize_Fastmail_RemovesPlusSuffix(string input, string expected)
+  {
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("alias@batman.fastmail.com", "batman@fastmail.com")]
+  [InlineData("shopping@john.fastmail.com", "john@fastmail.com")]
+  [InlineData("newsletter@user.fastmail.fm", "user@fastmail.fm")]
+  [InlineData("anything@bruce.fastmail.com", "bruce@fastmail.com")]
+  public void Normalize_Fastmail_SubdomainAddressing(string input, string expected)
+  {
+    // Fastmail subdomain addressing: alias@user.fastmail.com → user@fastmail.com
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john.doe@fastmail.com", "john.doe@fastmail.com")]
+  [InlineData("first.last@fastmail.fm", "first.last@fastmail.fm")]
+  public void Normalize_Fastmail_PreservesDots(string input, string expected)
+  {
+    // Dots are significant in Fastmail
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("JOHN@FASTMAIL.COM", "john@fastmail.com")]
+  [InlineData("Alias@User.Fastmail.Com", "user@fastmail.com")]
+  public void Normalize_Fastmail_LowercasesCorrectly(string input, string expected)
+  {
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("alias@sub.domain.fastmail.com", "alias@sub.domain.fastmail.com")]
+  [InlineData("alias+tag@sub.domain.fastmail.com", "alias+tag@sub.domain.fastmail.com")]
+  public void Normalize_Fastmail_MultiLevelSubdomain_FallsToDefault(string input, string expected)
+  {
+    // Only one level of subdomain is supported for Fastmail subdomain addressing.
+    // Multi-level subdomains fall through to default behavior (preserve plus suffix for unknown).
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("alias+tag@sub.domain.fastmail.com", "alias@sub.domain.fastmail.com")]
+  public void Normalize_Fastmail_MultiLevelSubdomain_WithAggressiveMode(string input, string expected)
+  {
+    // With aggressive mode, multi-level subdomains strip plus suffix.
+    var result = EmailNormalizer.Normalize(input, stripPlusForUnknownProviders: true);
+
+    result.Should().Be(expected);
+  }
+
+  #endregion
+
+
+  #region Tuta/Tutanota Tests (No Plus Addressing Support)
+
+  [Theory]
+  [InlineData("john@tuta.com", "john@tuta.com")]
+  [InlineData("john@tuta.io", "john@tuta.io")]
+  [InlineData("john@tutanota.com", "john@tutanota.com")]
+  [InlineData("john@tutanota.de", "john@tutanota.de")]
+  [InlineData("john@tutamail.com", "john@tutamail.com")]
+  [InlineData("john@keemail.me", "john@keemail.me")]
+  public void Normalize_Tuta_LowercasesOnly(string input, string expected)
+  {
+    // Tuta does not support plus addressing at all, so we don't strip +suffix
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john+tag@tuta.com", "john+tag@tuta.com")]
+  [InlineData("john+spam@tutanota.com", "john+spam@tutanota.com")]
+  [InlineData("user+newsletter@tuta.io", "user+newsletter@tuta.io")]
+  public void Normalize_Tuta_PreservesPlusSuffix(string input, string expected)
+  {
+    // Tuta doesn't support plus addressing, so +suffix is preserved
+    // (it's either invalid or treated as a literal different address)
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john.doe@tuta.com", "john.doe@tuta.com")]
+  [InlineData("first.last@tutanota.com", "first.last@tutanota.com")]
+  public void Normalize_Tuta_PreservesDots(string input, string expected)
+  {
+    // Dots are significant in Tuta
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+  #endregion
+
+
+  #region Chinese Providers Tests (No Plus Addressing Support)
+
+  [Theory]
+  [InlineData("john@qq.com", "john@qq.com")]
+  [InlineData("john@foxmail.com", "john@foxmail.com")]
+  [InlineData("john@vip.qq.com", "john@vip.qq.com")]
+  public void Normalize_QQMail_LowercasesOnly(string input, string expected)
+  {
+    // QQ Mail does not support plus addressing, uses manual alias system
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john+tag@qq.com", "john+tag@qq.com")]
+  [InlineData("john+spam@foxmail.com", "john+spam@foxmail.com")]
+  [InlineData("user+newsletter@vip.qq.com", "user+newsletter@vip.qq.com")]
+  public void Normalize_QQMail_PreservesPlusSuffix(string input, string expected)
+  {
+    // QQ Mail doesn't support plus addressing, so +suffix is preserved
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john@163.com", "john@163.com")]
+  [InlineData("john@126.com", "john@126.com")]
+  [InlineData("john@yeah.net", "john@yeah.net")]
+  public void Normalize_NetEase_LowercasesOnly(string input, string expected)
+  {
+    // NetEase does not support plus addressing, uses manual alias system
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john+tag@163.com", "john+tag@163.com")]
+  [InlineData("john+spam@126.com", "john+spam@126.com")]
+  [InlineData("user+newsletter@yeah.net", "user+newsletter@yeah.net")]
+  public void Normalize_NetEase_PreservesPlusSuffix(string input, string expected)
+  {
+    // NetEase doesn't support plus addressing, so +suffix is preserved
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john@sina.com", "john@sina.com")]
+  [InlineData("john@sina.cn", "john@sina.cn")]
+  [InlineData("john@sohu.com", "john@sohu.com")]
+  [InlineData("john@aliyun.com", "john@aliyun.com")]
+  public void Normalize_OtherChineseProviders_LowercasesOnly(string input, string expected)
+  {
+    // Sina, Sohu, Aliyun do not support plus addressing
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john+tag@sina.com", "john+tag@sina.com")]
+  [InlineData("john+spam@sohu.com", "john+spam@sohu.com")]
+  [InlineData("user+newsletter@aliyun.com", "user+newsletter@aliyun.com")]
+  public void Normalize_OtherChineseProviders_PreservesPlusSuffix(string input, string expected)
+  {
+    // Chinese providers don't support plus addressing, so +suffix is preserved
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john.doe@qq.com", "john.doe@qq.com")]
+  [InlineData("first.last@163.com", "first.last@163.com")]
+  [InlineData("user.name@sina.com", "user.name@sina.com")]
+  public void Normalize_ChineseProviders_PreservesDots(string input, string expected)
+  {
+    // Dots are significant in Chinese providers
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("JOHN@QQ.COM", "john@qq.com")]
+  [InlineData("USER@163.COM", "user@163.com")]
+  [InlineData("Test@FOXMAIL.com", "test@foxmail.com")]
+  public void Normalize_ChineseProviders_LowercasesCorrectly(string input, string expected)
+  {
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+  #endregion
+
+
+  #region Other Providers Tests (Unknown Providers)
+
+  [Theory]
+  [InlineData("john@company.com", "john@company.com")]
+  [InlineData("john.doe@example.org", "john.doe@example.org")]
+  [InlineData("john+tag@company.com", "john+tag@company.com")]
+  [InlineData("user+spam@custom-domain.io", "user+spam@custom-domain.io")]
+  public void Normalize_UnknownProvider_PreservesAllByDefault(string input, string expected)
+  {
+    // By default, unknown providers only get lowercased (conservative approach)
+    var result = EmailNormalizer.Normalize(input);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Theory]
+  [InlineData("john+tag@company.com", "john@company.com")]
+  [InlineData("john+spam@example.org", "john@example.org")]
+  [InlineData("user+newsletter@custom-domain.io", "user@custom-domain.io")]
+  public void Normalize_UnknownProvider_RemovesPlusSuffix_WhenAggressiveModeEnabled(string input, string expected)
+  {
+    // With stripPlusForUnknownProviders=true, strip +suffix for anti-abuse
+    var result = EmailNormalizer.Normalize(input, stripPlusForUnknownProviders: true);
+
+    result.Should().Be(expected);
+  }
+
+
+  [Fact]
+  public void Normalize_UnknownProvider_PreservesDotsInBothModes()
+  {
+    // Dots are preserved for unknown providers regardless of mode
+    var defaultResult = EmailNormalizer.Normalize("JOHN.DOE@EXAMPLE.COM");
+    var aggressiveResult = EmailNormalizer.Normalize("JOHN.DOE@EXAMPLE.COM", stripPlusForUnknownProviders: true);
+
+    defaultResult.Should().Be("john.doe@example.com");
+    aggressiveResult.Should().Be("john.doe@example.com");
+  }
+
+
+  [Fact]
+  public void Normalize_UnknownProvider_AggressiveMode_StripsPlusButPreservesDots()
+  {
+    var result = EmailNormalizer.Normalize("john.doe+tag@company.com", stripPlusForUnknownProviders: true);
+
+    result.Should().Be("john.doe@company.com");
   }
 
   #endregion

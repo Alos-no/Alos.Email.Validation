@@ -130,15 +130,60 @@ The library normalizes email addresses using provider-specific rules to prevent 
 | Provider | Normalization | Example |
 |----------|---------------|---------|
 | **Gmail** | Remove dots and +suffix | `j.doe+spam@gmail.com` → `jdoe@gmail.com` |
+| **ProtonMail** | Remove dots, hyphens, underscores, and +suffix | `j.doe-test_name+spam@proton.me` → `jdoetestname@proton.me` |
+| **Yahoo** | Remove -suffix (hyphen-based aliases, no plus support) | `john-shopping@yahoo.com` → `john@yahoo.com` |
+| **Fastmail** | Remove +suffix; subdomain addressing | `alias@user.fastmail.com` → `user@fastmail.com` |
 | **Outlook/Hotmail** | Remove +suffix only | `john+tag@outlook.com` → `john@outlook.com` |
-| **ProtonMail** | Remove +suffix only | `user+test@proton.me` → `user@proton.me` |
 | **iCloud** | Remove +suffix only | `user+tag@icloud.com` → `user@icloud.com` |
-| **Yahoo** | No normalization | Yahoo aliases are pre-created, not spontaneous |
-| **Other** | Lowercase only | Preserves address as-is |
+| **Yandex** | Remove +suffix only | `user+tag@yandex.ru` → `user@yandex.ru` |
+| **GMX/mail.com** | Remove +suffix only | `user+tag@gmx.com` → `user@gmx.com` |
+| **Tuta** | No normalization (no alias support) | `user+tag@tuta.com` → `user+tag@tuta.com` |
+| **AOL** | No normalization (unclear plus support) | `user+tag@aol.com` → `user+tag@aol.com` |
+| **QQ Mail** | No normalization (manual aliases only) | `user+tag@qq.com` → `user+tag@qq.com` |
+| **NetEase** | No normalization (manual aliases only) | `user+tag@163.com` → `user+tag@163.com` |
+| **Sina/Sohu/Aliyun** | No normalization | `user+tag@sina.com` → `user+tag@sina.com` |
+| **Other** | Lowercase only (default) | `User+Spam@Example.com` → `user+spam@example.com` |
+
+**Provider-Specific Notes:**
+
+- **ProtonMail** ignores dots, hyphens, and underscores as a security measure against impersonation attacks
+- **Yahoo** uses hyphen-based aliases (`nickname-keyword@yahoo.com`), not plus addressing
+- **Fastmail** supports both plus addressing (`user+tag@fastmail.com`) and subdomain addressing (`anything@user.fastmail.com`)
+- **Plus addressing providers**: Yandex, GMX, mail.com (200+ domains), Runbox, Mailfence, Rambler, Rackspace
+- **No plus addressing**: Tuta/Tutanota, AOL/AIM (unclear support)
+- **Chinese providers**: QQ Mail (qq.com, foxmail.com), NetEase (163.com, 126.com, yeah.net), Sina, Sohu, Aliyun use manual alias systems and do not support plus addressing
+- **Unknown providers**: By default, plus suffix is preserved (conservative). Use `stripPlusForUnknownProviders: true` for aggressive anti-abuse mode.
 
 ```csharp
 var normalized = _emailValidation.Normalize("J.Doe+Spam@GMAIL.com");
 // Returns: "jdoe@gmail.com"
+
+var protonNormalized = _emailValidation.Normalize("J.Doe-Test_Name+Tag@Proton.Me");
+// Returns: "jdoetestname@proton.me"
+
+var yahooNormalized = _emailValidation.Normalize("John-Shopping@Yahoo.com");
+// Returns: "john@yahoo.com"
+
+var fastmailSubdomain = _emailValidation.Normalize("Alias@User.Fastmail.Com");
+// Returns: "user@fastmail.com"
+
+var tutaNormalized = _emailValidation.Normalize("User+Tag@Tuta.com");
+// Returns: "user+tag@tuta.com" (Tuta doesn't support plus addressing)
+
+// Chinese providers: plus suffix preserved (no subaddressing support)
+var qqNormalized = _emailValidation.Normalize("User+Tag@QQ.com");
+// Returns: "user+tag@qq.com"
+
+var neteaseNormalized = _emailValidation.Normalize("User+Tag@163.com");
+// Returns: "user+tag@163.com"
+
+// Unknown providers: default (conservative) preserves plus suffix
+var unknownDefault = _emailValidation.Normalize("User+Spam@Company.com");
+// Returns: "user+spam@company.com"
+
+// Unknown providers: aggressive mode strips plus suffix
+var unknownAggressive = _emailValidation.Normalize("User+Spam@Company.com", stripPlusForUnknownProviders: true);
+// Returns: "user@company.com"
 ```
 
 ## Relay Service Detection
@@ -321,8 +366,8 @@ All services are registered as singletons and are thread-safe:
 
 The library includes comprehensive test coverage:
 
-- **134 unit tests** - Core validation logic
-- **39 integration tests** - File I/O, DI registration, hot reload, thread safety
+- **475+ unit tests** - Core validation logic, provider-specific normalization
+- **80+ integration tests** - File I/O, DI registration, hot reload, thread safety
 
 ```bash
 # Run all tests

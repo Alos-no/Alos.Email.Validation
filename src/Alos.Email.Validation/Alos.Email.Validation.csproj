@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>Alos.Email.Validation</PackageId>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Description>Email validation library for anti-abuse protection. Includes provider-specific normalization (Gmail, Outlook, etc.), relay service blocking, disposable domain detection, and MX record verification.</Description>
     <PackageTags>email;validation;spam;anti-abuse;disposable;relay;mx;dns</PackageTags>
   </PropertyGroup>
