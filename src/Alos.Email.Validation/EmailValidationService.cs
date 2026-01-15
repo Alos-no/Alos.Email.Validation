@@ -129,7 +129,8 @@ public sealed partial class EmailValidationService(
 
 
   /// <inheritdoc />
-  public string Normalize(string email) => EmailNormalizer.Normalize(email);
+  public string Normalize(string email, bool stripPlusForUnknownProviders = false)
+    => EmailNormalizer.Normalize(email, stripPlusForUnknownProviders);
 
   #endregion
 

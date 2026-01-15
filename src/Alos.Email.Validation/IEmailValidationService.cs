@@ -80,6 +80,10 @@ public interface IEmailValidationService
   ///   Normalizes an email address using provider-specific rules.
   /// </summary>
   /// <param name="email">The email address to normalize.</param>
+  /// <param name="stripPlusForUnknownProviders">
+  ///   When <c>true</c>, strips +suffix for unknown providers (more aggressive anti-abuse).
+  ///   When <c>false</c> (default), preserves +suffix for unknown providers (conservative).
+  /// </param>
   /// <returns>The normalized email address.</returns>
   /// <remarks>
   ///   <para>
@@ -87,5 +91,5 @@ public interface IEmailValidationService
   ///     from Gmail addresses) to produce a canonical form for duplicate detection.
   ///   </para>
   /// </remarks>
-  string Normalize(string email);
+  string Normalize(string email, bool stripPlusForUnknownProviders = false);
 }
