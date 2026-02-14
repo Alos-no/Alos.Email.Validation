@@ -38,7 +38,7 @@ public class MyService
 
     public async Task<bool> RegisterUserAsync(string email)
     {
-        var result = await _emailValidation.ValidateAsync(email);
+        var result = await _emailValidation.ValidateEmailAsync(email);
 
         if (!result.IsValid)
         {
@@ -62,7 +62,7 @@ public class MyService
         }
 
         // Normalize email before storing (prevents alias duplicates)
-        var normalizedEmail = _emailValidation.Normalize(email);
+        var normalizedEmail = EmailNormalizer.Normalize(email);
 
         // Continue with registration...
         return true;
@@ -155,34 +155,34 @@ The library normalizes email addresses using provider-specific rules to prevent 
 - **Unknown providers**: By default, plus suffix is preserved (conservative). Use `stripPlusForUnknownProviders: true` for aggressive anti-abuse mode.
 
 ```csharp
-var normalized = _emailValidation.Normalize("J.Doe+Spam@GMAIL.com");
+var normalized = EmailNormalizer.Normalize("J.Doe+Spam@GMAIL.com");
 // Returns: "jdoe@gmail.com"
 
-var protonNormalized = _emailValidation.Normalize("J.Doe-Test_Name+Tag@Proton.Me");
+var protonNormalized = EmailNormalizer.Normalize("J.Doe-Test_Name+Tag@Proton.Me");
 // Returns: "jdoetestname@proton.me"
 
-var yahooNormalized = _emailValidation.Normalize("John-Shopping@Yahoo.com");
+var yahooNormalized = EmailNormalizer.Normalize("John-Shopping@Yahoo.com");
 // Returns: "john@yahoo.com"
 
-var fastmailSubdomain = _emailValidation.Normalize("Alias@User.Fastmail.Com");
+var fastmailSubdomain = EmailNormalizer.Normalize("Alias@User.Fastmail.Com");
 // Returns: "user@fastmail.com"
 
-var tutaNormalized = _emailValidation.Normalize("User+Tag@Tuta.com");
+var tutaNormalized = EmailNormalizer.Normalize("User+Tag@Tuta.com");
 // Returns: "user+tag@tuta.com" (Tuta doesn't support plus addressing)
 
 // Chinese providers: plus suffix preserved (no subaddressing support)
-var qqNormalized = _emailValidation.Normalize("User+Tag@QQ.com");
+var qqNormalized = EmailNormalizer.Normalize("User+Tag@QQ.com");
 // Returns: "user+tag@qq.com"
 
-var neteaseNormalized = _emailValidation.Normalize("User+Tag@163.com");
+var neteaseNormalized = EmailNormalizer.Normalize("User+Tag@163.com");
 // Returns: "user+tag@163.com"
 
 // Unknown providers: default (conservative) preserves plus suffix
-var unknownDefault = _emailValidation.Normalize("User+Spam@Company.com");
+var unknownDefault = EmailNormalizer.Normalize("User+Spam@Company.com");
 // Returns: "user+spam@company.com"
 
 // Unknown providers: aggressive mode strips plus suffix
-var unknownAggressive = _emailValidation.Normalize("User+Spam@Company.com", stripPlusForUnknownProviders: true);
+var unknownAggressive = EmailNormalizer.Normalize("User+Spam@Company.com", stripPlusForUnknownProviders: true);
 // Returns: "user@company.com"
 ```
 
@@ -299,16 +299,19 @@ The auto-update background service calls this automatically after downloading ne
 public interface IEmailValidationService
 {
     // Full validation pipeline (format, relay, disposable, MX)
-    Task<EmailValidationResult> ValidateAsync(string email, CancellationToken ct = default);
+    Task<EmailValidationResult> ValidateEmailAsync(string email, CancellationToken ct = default);
+
+    // MX record verification only (use when other checks already done)
+    Task<EmailValidationResult> ValidateMxAsync(string email, CancellationToken ct = default);
+
+    // Format validation using HTML5 Living Standard rules (synchronous)
+    bool ValidateFormat(string email);
 
     // Check if domain is a relay service (synchronous)
     bool IsRelayService(string email);
 
     // Check if domain is disposable (synchronous)
     bool IsDisposable(string email);
-
-    // Normalize email using provider-specific rules
-    string Normalize(string email);
 }
 ```
 
@@ -330,16 +333,23 @@ public enum EmailValidationError
 }
 ```
 
-### Static Helpers
+### EmailNormalizer (Static)
 
-For scenarios where DI is not available:
+Email normalization is provided exclusively via the static `EmailNormalizer` class:
 
 ```csharp
-// Normalize without DI
+// Normalize email using provider-specific rules
 string normalized = EmailNormalizer.Normalize("j.doe+spam@gmail.com");
-string? domain = EmailNormalizer.ExtractDomain("user@example.com");
 
-// Check relay service without DI
+// Extract domain from email
+string? domain = EmailNormalizer.ExtractDomain("user@example.com");
+```
+
+### RelayServiceBlocklist (Static)
+
+For relay service detection without DI:
+
+```csharp
 bool isRelay = RelayServiceBlocklist.IsRelayService("duck.com");
 ```
 
