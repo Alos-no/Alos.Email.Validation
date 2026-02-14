@@ -47,7 +47,7 @@ var testEmails = new[]
 foreach (var email in testEmails)
 {
   Console.WriteLine($"Testing: {email}");
-  Console.WriteLine($"  Normalized: {service.Normalize(email)}");
+  Console.WriteLine($"  Normalized: {EmailNormalizer.Normalize(email)}");
   Console.WriteLine($"  Is Relay Service: {service.IsRelayService(email)}");
   Console.WriteLine($"  Is Disposable: {service.IsDisposable(email)}");
 
@@ -73,7 +73,7 @@ var normalizationExamples = new (string Email, string Description)[]
 
 foreach (var (email, description) in normalizationExamples)
 {
-  var normalized = service.Normalize(email);
+  var normalized = EmailNormalizer.Normalize(email);
   Console.WriteLine($"  {email} -> {normalized}");
   Console.WriteLine($"    ({description})");
 }
