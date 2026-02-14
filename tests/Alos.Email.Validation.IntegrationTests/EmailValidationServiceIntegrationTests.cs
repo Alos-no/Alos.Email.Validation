@@ -198,16 +198,9 @@ public sealed class EmailValidationServiceIntegrationTests : IDisposable
   [Fact]
   public void Normalize_EndToEnd_GmailNormalization()
   {
-    // Arrange
-    var services = new ServiceCollection();
-    services.AddLogging();
-    services.AddEmailValidation();
-
-    using var provider = services.BuildServiceProvider();
-    var validationService = provider.GetRequiredService<IEmailValidationService>();
-
     // Act: Normalize a Gmail address with dots and plus tag.
-    var normalized = validationService.Normalize("Test.User+tag@GMAIL.COM");
+    // Normalize is a static method on EmailNormalizer — no DI needed.
+    var normalized = EmailNormalizer.Normalize("Test.User+tag@GMAIL.COM");
 
     // Assert: The normalized email should be lowercase with dots and plus removed.
     normalized.Should().Be("testuser@gmail.com");

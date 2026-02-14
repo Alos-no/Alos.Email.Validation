@@ -127,11 +127,6 @@ public sealed partial class EmailValidationService(
     return disposableChecker.IsDisposable(domain);
   }
 
-
-  /// <inheritdoc />
-  public string Normalize(string email, bool stripPlusForUnknownProviders = false)
-    => EmailNormalizer.Normalize(email, stripPlusForUnknownProviders);
-
   #endregion
 
 

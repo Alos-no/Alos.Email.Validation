@@ -75,21 +75,4 @@ public interface IEmailValidationService
   /// <param name="email">The email address to check.</param>
   /// <returns>True if the domain is disposable (e.g., Mailinator, Guerrilla Mail).</returns>
   bool IsDisposable(string email);
-
-  /// <summary>
-  ///   Normalizes an email address using provider-specific rules.
-  /// </summary>
-  /// <param name="email">The email address to normalize.</param>
-  /// <param name="stripPlusForUnknownProviders">
-  ///   When <c>true</c>, strips +suffix for unknown providers (more aggressive anti-abuse).
-  ///   When <c>false</c> (default), preserves +suffix for unknown providers (conservative).
-  /// </param>
-  /// <returns>The normalized email address.</returns>
-  /// <remarks>
-  ///   <para>
-  ///     Applies provider-specific normalization rules (e.g., removing dots and plus-addressing
-  ///     from Gmail addresses) to produce a canonical form for duplicate detection.
-  ///   </para>
-  /// </remarks>
-  string Normalize(string email, bool stripPlusForUnknownProviders = false);
 }

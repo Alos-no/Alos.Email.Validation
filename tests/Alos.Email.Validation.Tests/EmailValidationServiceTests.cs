@@ -500,7 +500,8 @@ public class EmailValidationServiceTests
   [InlineData("JOHN@EXAMPLE.COM", "john@example.com")]
   public void Normalize_ReturnsNormalizedEmail(string input, string expected)
   {
-    var result = _service.Normalize(input);
+    // Normalize is a static method on EmailNormalizer, not an instance method on the service.
+    var result = EmailNormalizer.Normalize(input);
 
     result.Should().Be(expected);
   }
@@ -541,7 +542,8 @@ public class EmailValidationServiceTests
   [Fact]
   public void Normalize_NullEmail_ReturnsNull()
   {
-    var result = _service.Normalize(null!);
+    // Normalize is a static method on EmailNormalizer, not an instance method on the service.
+    var result = EmailNormalizer.Normalize(null!);
 
     result.Should().BeNull();
   }
