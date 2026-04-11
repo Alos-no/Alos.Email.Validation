@@ -22,7 +22,6 @@ public class RelayServiceBlocklistTests
   [InlineData("anonaddy.com")]
   [InlineData("users.noreply.github.com")]     // GitHub
   [InlineData("fastmail.com")]                 // Fastmail masked email
-  [InlineData("cloaked.id")]                   // Cloaked
   [InlineData("nicoric.com")]                  // Burner Mail
   public void IsRelayService_BlockedDomain_ReturnsTrue(string domain)
   {

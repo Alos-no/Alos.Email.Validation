@@ -19,7 +19,7 @@ public static class RelayServiceBlocklist
   #region Constants & Statics
 
   /// <summary>
-  ///   Exact domain matches (21 domains).
+  ///   Exact domain matches (20 domains).
   /// </summary>
   private static readonly HashSet<string> BlockedDomains = new(StringComparer.OrdinalIgnoreCase)
   {
@@ -41,7 +41,7 @@ public static class RelayServiceBlocklist
     // Fastmail
     "fastmail.com",
     // Cloaked
-    "cloaked.id", "myclkd.email", "clkdmail.com",
+    "myclkd.email", "clkdmail.com",
     // Burner Mail
     "nicoric.com"
   };

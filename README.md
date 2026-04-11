@@ -197,7 +197,7 @@ Blocks email relay/forwarding services that enable unlimited alias creation:
 - **Proton Pass** - (`passmail.net`)
 - **addy.io** - AnonAddy (`addy.io`, `anonaddy.com`, etc.)
 - **Fastmail** - Masked Email (`fastmail.com`)
-- **Cloaked** - (`cloaked.id`, `myclkd.email`)
+- **Cloaked** - (`myclkd.email`)
 - **Burner Mail** - (`nicoric.com`)
 - **GitHub** - (`users.noreply.github.com`)
 
