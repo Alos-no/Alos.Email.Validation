@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Tests.Shared.Fixtures;
+using Tests.Shared.TestHelpers;
 
 /// <summary>
 ///   Integration tests for hot-reload functionality of blocklists.
@@ -237,6 +238,89 @@ public sealed class HotReloadIntegrationTests : IDisposable
     // Assert: Inline custom lists should still be applied after reload.
     checker.IsDisposable("inline-blocked.com").Should().BeTrue();
     checker.IsDisposable("inline-allowed.com").Should().BeFalse();
+  }
+
+  #endregion
+
+
+  #region Tests - Embedded List Merge on Reload
+
+  [Fact]
+  public void ReloadFromDisk_RewrittenPrimaryBlocklist_KeepsEmbeddedList()
+  {
+    // Arrange: A checker over a directory primary blocklist of 3 fresh domains.
+    var token = Guid.NewGuid().ToString("N");
+    var initialDomains = Enumerable.Range(1, 3).Select(i => $"initial-{token}-{i}.com").ToArray();
+    var replacementDomain = $"replacement-{token}.com";
+    var blocklistDir = _fixture.CreateSubdirectory("reload-rewritten-primary");
+    var blocklistPath = _fixture.CreateBlocklistFile(blocklistDir, initialDomains);
+
+    var options = Options.Create(new EmailValidationOptions
+    {
+      BlocklistDirectory = blocklistDir
+    });
+    var checker = new DisposableEmailDomainChecker(options, Mock.Of<ILogger<DisposableEmailDomainChecker>>());
+
+    // Act: Rewrite the primary blocklist to one other domain and reload.
+    File.WriteAllLines(blocklistPath, [replacementDomain]);
+    checker.ReloadFromDisk(blocklistDir);
+
+    // Assert: The new domain is blocked, a dropped one is not, the embedded list is kept.
+    checker.IsDisposable(replacementDomain).Should().BeTrue();
+    checker.IsDisposable(initialDomains[0]).Should().BeFalse();
+    checker.IsDisposable("mailinator.com").Should().BeTrue();
+  }
+
+
+  [Fact]
+  public void ReloadFromDisk_EmptiedPrimaryBlocklist_KeepsEmbeddedList()
+  {
+    // Arrange: A checker over a directory primary blocklist of 3 fresh domains.
+    var token = Guid.NewGuid().ToString("N");
+    var initialDomains = Enumerable.Range(1, 3).Select(i => $"initial-{token}-{i}.com").ToArray();
+    var blocklistDir = _fixture.CreateSubdirectory("reload-emptied-primary");
+    var blocklistPath = _fixture.CreateBlocklistFile(blocklistDir, initialDomains);
+
+    var options = Options.Create(new EmailValidationOptions
+    {
+      BlocklistDirectory = blocklistDir
+    });
+    var checker = new DisposableEmailDomainChecker(options, Mock.Of<ILogger<DisposableEmailDomainChecker>>());
+
+    // Act: Empty the primary blocklist (the file an empty download writes at floor 0) and reload.
+    File.WriteAllText(blocklistPath, string.Empty);
+    checker.ReloadFromDisk(blocklistDir);
+
+    // Assert: Every embedded domain is still blocked, the dropped directory domains are not.
+    EmbeddedBlocklistReader.ReadEmbeddedBlocklistDomains().Should().OnlyContain(domain => checker.IsDisposable(domain));
+    initialDomains.Should().NotContain(domain => checker.IsDisposable(domain));
+  }
+
+
+  [Fact]
+  public void ReloadFromDisk_PrimaryBlocklistLargerThanEmbedded_KeepsEmbeddedList()
+  {
+    // Arrange: A checker over a directory primary blocklist of 3 fresh domains.
+    var embeddedDomains = EmbeddedBlocklistReader.ReadEmbeddedBlocklistDomains();
+    var token = Guid.NewGuid().ToString("N");
+    var initialDomains = Enumerable.Range(1, 3).Select(i => $"initial-{token}-{i}.com").ToArray();
+    var largerDomains = Enumerable.Range(1, embeddedDomains.Count + 1).Select(i => $"larger-{token}-{i}.com").ToArray();
+    var blocklistDir = _fixture.CreateSubdirectory("reload-larger-primary");
+    var blocklistPath = _fixture.CreateBlocklistFile(blocklistDir, initialDomains);
+
+    var options = Options.Create(new EmailValidationOptions
+    {
+      BlocklistDirectory = blocklistDir
+    });
+    var checker = new DisposableEmailDomainChecker(options, Mock.Of<ILogger<DisposableEmailDomainChecker>>());
+
+    // Act: Rewrite the primary blocklist to E + 1 fresh domains, longer than the embedded list, and reload.
+    File.WriteAllLines(blocklistPath, largerDomains);
+    checker.ReloadFromDisk(blocklistDir);
+
+    // Assert: Every rewritten domain and every embedded domain is blocked.
+    largerDomains.Should().OnlyContain(domain => checker.IsDisposable(domain));
+    embeddedDomains.Should().OnlyContain(domain => checker.IsDisposable(domain));
   }
 
   #endregion

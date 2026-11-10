@@ -7,7 +7,7 @@ Email validation library for anti-abuse protection in SaaS applications.
 - **Format Validation** - HTML5 Living Standard compliant email format validation
 - **Provider-Specific Normalization** - Gmail dots/plus, Outlook plus, ProtonMail plus, etc.
 - **Relay Service Blocking** - Apple Hide My Email, Firefox Relay, DuckDuckGo, SimpleLogin, etc.
-- **Disposable Domain Detection** - 38,000+ known disposable email providers
+- **Disposable Domain Detection** - The community-maintained disposable-email-domains list (38,000+ domains), which the built-in auto-updater downloads and keeps current or which a blocklist directory supplies; the package embeds a starter list that is always loaded
 - **MX Record Verification** - DNS-based domain validation with fail-open strategy
 - **MX Whitelist** - Bypass MX validation for test/development domains
 - **Custom Blocklist/Allowlist** - Override built-in lists with your own domains
@@ -58,7 +58,6 @@ builder.Services.AddEmailValidationWithAutoUpdate(builder.Configuration);
 | `ValidateFormat(email)` | Synchronous HTML5 format validation |
 | `IsRelayService(email)` | Check if email uses a relay/forwarding service |
 | `IsDisposable(email)` | Check if email domain is disposable |
-| `Normalize(email)` | Get provider-normalized form for uniqueness checks |
 
 ### Usage Patterns
 
@@ -78,7 +77,7 @@ public class RegistrationService(IEmailValidationService emailValidator)
         }
 
         // Get normalized email for uniqueness checks
-        var normalized = emailValidator.Normalize(email);
+        var normalized = EmailNormalizer.Normalize(email);
 
         // Continue with registration...
         return true;
@@ -136,22 +135,25 @@ if (emailValidator.IsDisposable(email))
     return Error("Disposable emails not allowed");
 
 // Normalization for uniqueness
-var normalized = emailValidator.Normalize(email);
+var normalized = EmailNormalizer.Normalize(email);
 ```
 
 ## Configuration Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `BlocklistDirectory` | string | null | Directory for blocklist files |
-| `EnableAutoUpdate` | bool | false | Enable background blocklist updates |
+| `BlocklistDirectory` | string | null | Directory for blocklist files, merged into the embedded lists. When null with auto-update on: `LocalApplicationData/alos/email-blocklists` |
+| `EnableAutoUpdate` | bool | false | Enable background blocklist updates; takes effect with the `AddEmailValidationWithAutoUpdate` registration |
 | `UpdateInterval` | TimeSpan | 1 day | Interval between blocklist updates |
 | `InitialUpdateDelay` | TimeSpan | 30s | Delay before first update |
+| `MinimumBlocklistEntryCount` | int | 0 | Floor for the primary blocklist (0: no check): a shorter download is not written, and the host start aborts when the loaded blocklist holds fewer entries |
 | `CustomBlocklist` | string[] | [] | Additional domains to block |
 | `CustomAllowlist` | string[] | [] | Domains to exclude from blocking |
 | `CustomBlocklistUrls` | string[] | [] | URLs to fetch blocklists from |
 | `CustomAllowlistUrls` | string[] | [] | URLs to fetch allowlists from |
 | `WhitelistedMxDomains` | string[] | [] | Domains that bypass MX validation |
+
+A host that sets `MinimumBlocklistEntryCount` mounts or seeds a blocklist directory holding the full list, because the floor is compared at start, before the first update cycle.
 
 ### WhitelistedMxDomains
 
@@ -180,6 +182,8 @@ Whitelisted domains:
 | `IMxRecordValidator` | DNS MX record verification |
 | `EmailNormalizer` | Static class for provider-specific email normalization |
 | `RelayServiceBlocklist` | Static class blocking 21+ relay/forwarding services |
+
+Version 1.4.0 adds the `BlockedDomainCount` property (the loaded blocklist's entry count) to `IDisposableEmailDomainChecker`; a consumer that implements the interface must add it.
 
 ## Framework Support
 

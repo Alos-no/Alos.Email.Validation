@@ -8,7 +8,7 @@ A comprehensive .NET library for email validation and anti-abuse protection. Inc
 
 - **Email Normalization** - Provider-specific rules for Gmail, Outlook, ProtonMail, iCloud, and more
 - **Relay Service Detection** - Block Apple Hide My Email, Firefox Relay, DuckDuckGo, SimpleLogin, etc.
-- **Disposable Domain Detection** - 38,000+ domains from [disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains)
+- **Disposable Domain Detection** - The community-maintained [disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains) list (38,000+ domains), which the built-in auto-updater downloads and keeps current or which a blocklist directory supplies; the package embeds a starter list that is always loaded
 - **MX Record Verification** - DNS lookup to verify domain can receive email
 - **Custom Blocklist/Allowlist** - Override built-in lists with your own domains
 - **Auto-Update** - Background service to keep blocklists current
@@ -91,6 +91,7 @@ builder.Services.AddEmailValidation(options =>
 ```json
 {
   "EmailValidation": {
+    "BlocklistDirectory": "/var/lib/alos/email-blocklists",
     "EnableAutoUpdate": true,
     "UpdateInterval": "1.00:00:00",
     "CustomBlocklist": ["spammer.com", "badactor.net"],
@@ -103,11 +104,12 @@ builder.Services.AddEmailValidation(options =>
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `BlocklistDirectory` | `string?` | Cross-platform default | Path to blocklist files. Defaults to `LocalApplicationData/alos/email-blocklists`. |
-| `EnableAutoUpdate` | `bool` | `false` | Enable background blocklist updates from GitHub. |
+| `BlocklistDirectory` | `string?` | `null` | Path to blocklist files, merged into the embedded lists. When null with auto-update on, the lists are saved to and read from `LocalApplicationData/alos/email-blocklists`, at start and at every update cycle. When null with auto-update off, the embedded lists are used. |
+| `EnableAutoUpdate` | `bool` | `false` | Enable background blocklist updates from GitHub. Takes effect with the `AddEmailValidationWithAutoUpdate` registration (see Auto-Update Setup). |
 | `UpdateInterval` | `TimeSpan` | `24:00:00` | Interval between update checks. |
 | `BlocklistUrl` | `string` | GitHub URL | URL for primary blocklist download. |
 | `AllowlistUrl` | `string` | GitHub URL | URL for primary allowlist download. |
+| `MinimumBlocklistEntryCount` | `int` | `0` | Floor for the primary blocklist (0: no check). A downloaded primary blocklist with fewer entries is not written, and the host start aborts when the loaded blocklist holds fewer entries. |
 | `CustomBlocklistUrls` | `List<string>` | `[]` | Additional URLs for custom blocklists (fetched by auto-updater). |
 | `CustomAllowlistUrls` | `List<string>` | `[]` | Additional URLs for custom allowlists (fetched by auto-updater). |
 | `CustomBlocklist` | `List<string>` | `[]` | Inline domains to add to blocklist. |
@@ -121,7 +123,9 @@ Enable automatic blocklist updates from GitHub:
 builder.Services.AddEmailValidationWithAutoUpdate(builder.Configuration);
 ```
 
-This registers a background service that periodically downloads the latest blocklists. Requires `BlocklistDirectory` to be set and `EnableAutoUpdate` to be `true`.
+This registers a background service that periodically downloads the latest blocklists. Requires `EnableAutoUpdate` to be `true`; with no `BlocklistDirectory` set, the lists are saved to and read from the default directory.
+
+When `MinimumBlocklistEntryCount` is above 0, a downloaded primary blocklist holding fewer entries is not written: the previous file is kept, a warning is logged, and the other lists are still written and reloaded. With the same floor, every registration method aborts the host start with an `OptionsValidationException` when the loaded blocklist (embedded list, directory files and `CustomBlocklist` merged) holds fewer entries. A host that sets `MinimumBlocklistEntryCount` mounts or seeds a blocklist directory holding the full list, because the floor is compared at start, before the first update cycle.
 
 ## Email Normalization
 
@@ -210,7 +214,7 @@ bool isRelay = _emailValidation.IsRelayService("user@duck.com");
 
 ## Disposable Domain Detection
 
-Detects 38,000+ disposable/temporary email domains using the community-maintained [disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains) list.
+Detects disposable/temporary email domains using the community-maintained [disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains) list (38,000+ domains), which the built-in auto-updater downloads and keeps current or which a blocklist directory supplies; the package embeds a starter list that is always loaded.
 
 ```csharp
 bool isDisposable = _emailValidation.IsDisposable("user@mailinator.com");
@@ -239,8 +243,9 @@ builder.Services.AddEmailValidation(options =>
 For organization-specific or third-party blocklists that you want to keep synchronized, use URL-based configuration:
 
 ```csharp
-builder.Services.AddEmailValidation(options =>
+builder.Services.AddEmailValidationWithAutoUpdate(options =>
 {
+    options.BlocklistDirectory = "/var/lib/alos/email-blocklists";
     options.EnableAutoUpdate = true;
 
     // Add custom blocklist URLs (fetched alongside primary lists)
@@ -275,7 +280,7 @@ badactor.net
 another-blocked.com
 ```
 
-All files matching the naming convention are loaded and merged at startup and on hot reload.
+All files matching the naming convention are merged into the embedded lists at startup and on hot reload.
 
 ## Hot Reload
 
@@ -289,7 +294,9 @@ private readonly IDisposableEmailDomainChecker _checker;
 _checker.ReloadFromDisk("/var/lib/alos/email-blocklists");
 ```
 
-The auto-update background service calls this automatically after downloading new lists.
+The auto-update background service calls this automatically after downloading new lists. A reload always starts from the embedded lists and merges the directory's files into them, so an empty or truncated directory never loads fewer entries than the package ships.
+
+Version 1.4.0 adds the `BlockedDomainCount` property (the loaded blocklist's entry count) to `IDisposableEmailDomainChecker`; a consumer that implements the interface must add it.
 
 ## API Reference
 

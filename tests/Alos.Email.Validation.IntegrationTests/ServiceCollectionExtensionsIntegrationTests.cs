@@ -4,7 +4,9 @@ using Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Tests.Shared.Fixtures;
+using Tests.Shared.TestHelpers;
 
 /// <summary>
 ///   Integration tests for <see cref="ServiceCollectionExtensions"/> DI registration.
@@ -287,8 +289,15 @@ public sealed class ServiceCollectionExtensionsIntegrationTests : IDisposable
         ["EmailValidation:BlocklistDirectory"] = blocklistDir,
         ["EmailValidation:EnableAutoUpdate"] = "true",
         ["EmailValidation:UpdateInterval"] = "06:00:00",
+        ["EmailValidation:InitialUpdateDelay"] = "00:00:05",
         ["EmailValidation:BlocklistUrl"] = "https://example.com/blocklist.conf",
-        ["EmailValidation:AllowlistUrl"] = "https://example.com/allowlist.conf"
+        ["EmailValidation:AllowlistUrl"] = "https://example.com/allowlist.conf",
+        ["EmailValidation:MinimumBlocklistEntryCount"] = "1000",
+        ["EmailValidation:CustomBlocklistUrls:0"] = "https://example.com/custom-blocklist.txt",
+        ["EmailValidation:CustomAllowlistUrls:0"] = "https://example.com/custom-allowlist.txt",
+        ["EmailValidation:CustomBlocklist:0"] = "custom-blocked.com",
+        ["EmailValidation:CustomAllowlist:0"] = "custom-allowed.com",
+        ["EmailValidation:WhitelistedMxDomains:0"] = "itest.alos.local"
       })
       .Build();
 
@@ -304,20 +313,24 @@ public sealed class ServiceCollectionExtensionsIntegrationTests : IDisposable
     options.Value.BlocklistDirectory.Should().Be(blocklistDir);
     options.Value.EnableAutoUpdate.Should().BeTrue();
     options.Value.UpdateInterval.Should().Be(TimeSpan.FromHours(6));
+    options.Value.InitialUpdateDelay.Should().Be(TimeSpan.FromSeconds(5));
     options.Value.BlocklistUrl.Should().Be("https://example.com/blocklist.conf");
     options.Value.AllowlistUrl.Should().Be("https://example.com/allowlist.conf");
+    options.Value.MinimumBlocklistEntryCount.Should().Be(1000);
+    options.Value.CustomBlocklistUrls.Should().Equal("https://example.com/custom-blocklist.txt");
+    options.Value.CustomAllowlistUrls.Should().Equal("https://example.com/custom-allowlist.txt");
+    options.Value.CustomBlocklist.Should().Equal("custom-blocked.com");
+    options.Value.CustomAllowlist.Should().Equal("custom-allowed.com");
+    options.Value.WhitelistedMxDomains.Should().Equal("itest.alos.local");
   }
 
 
   [Fact]
   public void Configuration_DefaultValues_Applied()
   {
-    // Arrange: Create configuration with minimal/empty section.
+    // Arrange: Create configuration with no EmailValidation key, so every asserted value is the option's own default.
     var configuration = new ConfigurationBuilder()
-      .AddInMemoryCollection(new Dictionary<string, string?>
-      {
-        ["EmailValidation:EnableAutoUpdate"] = "false" // Only set one property.
-      })
+      .AddInMemoryCollection(new Dictionary<string, string?>())
       .Build();
 
     var services = new ServiceCollection();
@@ -332,10 +345,17 @@ public sealed class ServiceCollectionExtensionsIntegrationTests : IDisposable
     options.Value.BlocklistDirectory.Should().BeNull();
     options.Value.EnableAutoUpdate.Should().BeFalse();
     options.Value.UpdateInterval.Should().Be(TimeSpan.FromHours(24)); // Default.
-    options.Value.BlocklistUrl.Should().Contain("disposable-email-domains");
-    options.Value.AllowlistUrl.Should().Contain("disposable-email-domains");
+    options.Value.InitialUpdateDelay.Should().Be(TimeSpan.FromSeconds(30));
+    options.Value.BlocklistUrl.Should().Be(
+      "https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/master/disposable_email_blocklist.conf");
+    options.Value.AllowlistUrl.Should().Be(
+      "https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/master/allowlist.conf");
     options.Value.CustomBlocklist.Should().BeEmpty();
     options.Value.CustomAllowlist.Should().BeEmpty();
+    options.Value.CustomBlocklistUrls.Should().BeEmpty();
+    options.Value.CustomAllowlistUrls.Should().BeEmpty();
+    options.Value.WhitelistedMxDomains.Should().BeEmpty();
+    options.Value.MinimumBlocklistEntryCount.Should().Be(0); // Default: no floor.
   }
 
 
@@ -366,6 +386,86 @@ public sealed class ServiceCollectionExtensionsIntegrationTests : IDisposable
     options.Value.CustomBlocklist.Should().Contain("custom-blocked-2.com");
     options.Value.CustomAllowlist.Should().HaveCount(1);
     options.Value.CustomAllowlist.Should().Contain("custom-allowed-1.com");
+  }
+
+  #endregion
+
+
+  #region Tests - Blocklist Floor at Host Start
+
+  [Theory]
+  [InlineData(4)] // The loaded blocked count itself.
+  [InlineData(3)] // One below it.
+  public async Task AddEmailValidation_LoadedBlocklistAtOrAboveMinimumEntryCount_HostStarts(int floorAboveEmbeddedEntryCount)
+  {
+    // Arrange: A host whose loaded blocked set holds E + 4 entries, with a floor at or below that count.
+    var embeddedEntryCount = EmbeddedBlocklistReader.ReadEmbeddedBlocklistDomains().Count;
+    using var host = BuildHostWithLoadedBlocklistOfEmbeddedPlusFour(embeddedEntryCount + floorAboveEmbeddedEntryCount);
+    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+    // Act
+    var start = async () => await host.StartAsync(cts.Token);
+
+    // Assert: The host starts.
+    await start.Should().NotThrowAsync();
+
+    await host.StopAsync(CancellationToken.None);
+  }
+
+
+  [Fact]
+  public async Task AddEmailValidation_LoadedBlocklistBelowMinimumEntryCount_HostStartAborts()
+  {
+    // Arrange: A host whose loaded blocked set holds E + 4 entries, with the floor at E + 5.
+    // No service is resolved before the start, so the abort proves the check runs at host start.
+    var embeddedEntryCount = EmbeddedBlocklistReader.ReadEmbeddedBlocklistDomains().Count;
+    var minimumEntryCount = embeddedEntryCount + 5;
+    using var host = BuildHostWithLoadedBlocklistOfEmbeddedPlusFour(minimumEntryCount);
+    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+    // Act
+    var start = async () => await host.StartAsync(cts.Token);
+
+    // Assert: The start aborts with one failure naming the configuration key, the floor and the loaded count.
+    var exception = await start.Should().ThrowAsync<OptionsValidationException>();
+    exception.Which.OptionsType.Should().Be(typeof(EmailValidationOptions));
+    exception.Which.Failures.Should().ContainSingle()
+      .Which.Should().Contain("EmailValidation:MinimumBlocklistEntryCount")
+      .And.Contain($"is {minimumEntryCount}")
+      .And.Contain($"holds {embeddedEntryCount + 4} entries");
+  }
+
+  #endregion
+
+
+  #region Methods - Private
+
+  /// <summary>
+  ///   Builds a host registering <c>AddEmailValidation</c> whose loaded blocked set holds E + 4 entries: the embedded
+  ///   list, a directory primary of 3 fresh domains plus <c>mailinator.com</c> (counted once), and one configured domain.
+  /// </summary>
+  private IHost BuildHostWithLoadedBlocklistOfEmbeddedPlusFour(int minimumBlocklistEntryCount)
+  {
+    var token = Guid.NewGuid().ToString("N");
+    var blocklistDir = _fixture.CreateSubdirectory($"floor-{token}");
+    _fixture.CreateBlocklistFile(
+      blocklistDir,
+      $"dir-{token}-1.com",
+      $"dir-{token}-2.com",
+      $"dir-{token}-3.com",
+      "mailinator.com");
+
+    return Host.CreateDefaultBuilder()
+      .ConfigureServices(services =>
+      {
+        services.AddEmailValidation(options =>
+        {
+          options.BlocklistDirectory = blocklistDir;
+          options.CustomBlocklist = [$"configured-{token}.com"];
+          options.MinimumBlocklistEntryCount = minimumBlocklistEntryCount;
+        });
+      })
+      .Build();
   }
 
   #endregion

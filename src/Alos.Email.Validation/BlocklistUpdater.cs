@@ -13,12 +13,18 @@ using Microsoft.Extensions.Options;
 ///     Downloads the primary blocklist and allowlist from the configured URLs,
 ///     as well as any custom blocklist/allowlist URLs. All downloaded files are
 ///     saved to the configured directory and then merged by the
-///     <see cref="IDisposableEmailDomainChecker"/> on reload.
+///     <see cref="IDisposableEmailDomainChecker"/> on reload, except a primary blocklist holding fewer
+///     entries than <see cref="EmailValidationOptions.MinimumBlocklistEntryCount"/>, which keeps the previous file.
 ///   </para>
 /// </remarks>
 public sealed class BlocklistUpdater : BackgroundService
 {
   #region Fields
+
+  /// <summary>
+  ///   Suffix of the file a download is written to before it replaces its destination; no list file pattern matches it.
+  /// </summary>
+  private const string DownloadTemporaryFileSuffix = ".download";
 
   private readonly EmailValidationOptions _options;
   private readonly IHttpClientFactory _httpClientFactory;
@@ -67,10 +73,8 @@ public sealed class BlocklistUpdater : BackgroundService
       return;
     }
 
-    // Use configured directory or fall back to cross-platform default.
-    var directory = string.IsNullOrEmpty(_options.BlocklistDirectory)
-      ? EmailValidationOptions.DefaultBlocklistDirectory
-      : _options.BlocklistDirectory;
+    // The directory the checker reads at start; never null here, because auto-update is on.
+    var directory = _options.ResolveBlocklistDirectory()!;
 
     // Ensure directory exists.
     Directory.CreateDirectory(directory);
@@ -129,79 +133,104 @@ public sealed class BlocklistUpdater : BackgroundService
     var client = _httpClientFactory.CreateClient();
     var directory = _resolvedDirectory;
 
-    // Download primary blocklist.
-    await DownloadAndSaveAsync(
-      client,
-      _options.BlocklistUrl,
-      Path.Combine(directory, BlocklistFileNames.PrimaryBlocklist),
-      "primary blocklist",
-      ct);
-
-    // Download primary allowlist.
-    await DownloadAndSaveAsync(
-      client,
-      _options.AllowlistUrl,
-      Path.Combine(directory, BlocklistFileNames.PrimaryAllowlist),
-      "primary allowlist",
-      ct);
-
-    // Download custom blocklists.
-    for (var i = 0; i < _options.CustomBlocklistUrls.Count; i++)
-    {
-      var url = _options.CustomBlocklistUrls[i];
-      var filename = $"{BlocklistFileNames.CustomBlocklistPrefix}{i:D3}{BlocklistFileNames.FileExtension}";
-
-      await DownloadAndSaveAsync(
-        client,
+    // Every list of the cycle in download order: the two primary lists, then each custom list URL.
+    List<(string Url, string FileName, string Description, int MinimumEntryCount)> listDownloads =
+    [
+      (_options.BlocklistUrl, BlocklistFileNames.PrimaryBlocklist, "primary blocklist", _options.MinimumBlocklistEntryCount),
+      (_options.AllowlistUrl, BlocklistFileNames.PrimaryAllowlist, "primary allowlist", 0),
+      .. _options.CustomBlocklistUrls.Select((url, i) => (
         url,
-        Path.Combine(directory, filename),
+        $"{BlocklistFileNames.CustomBlocklistPrefix}{i:D3}{BlocklistFileNames.FileExtension}",
         $"custom blocklist #{i + 1}",
-        ct);
-    }
-
-    // Download custom allowlists.
-    for (var i = 0; i < _options.CustomAllowlistUrls.Count; i++)
-    {
-      var url = _options.CustomAllowlistUrls[i];
-      var filename = $"{BlocklistFileNames.CustomAllowlistPrefix}{i:D3}{BlocklistFileNames.FileExtension}";
-
-      await DownloadAndSaveAsync(
-        client,
+        0)),
+      .. _options.CustomAllowlistUrls.Select((url, i) => (
         url,
-        Path.Combine(directory, filename),
+        $"{BlocklistFileNames.CustomAllowlistPrefix}{i:D3}{BlocklistFileNames.FileExtension}",
         $"custom allowlist #{i + 1}",
-        ct);
+        0)),
+    ];
+
+    var writtenListCount = 0;
+
+    foreach (var listDownload in listDownloads)
+    {
+      if (await DownloadAndSaveAsync(
+        client,
+        listDownload.Url,
+        Path.Combine(directory, listDownload.FileName),
+        listDownload.Description,
+        listDownload.MinimumEntryCount,
+        ct))
+      {
+        writtenListCount++;
+      }
     }
 
     // Reload checker with all downloaded lists.
     _checker.ReloadFromDisk(directory);
 
     _logger.LogInformation(
-      "Blocklists updated successfully. Primary + {CustomBlocklistCount} custom blocklists + {CustomAllowlistCount} custom allowlists",
-      _options.CustomBlocklistUrls.Count,
-      _options.CustomAllowlistUrls.Count);
+      "Blocklist update cycle finished: {WrittenListCount} of {RequestedListCount} lists written, checker reloaded",
+      writtenListCount,
+      listDownloads.Count);
   }
 
 
   /// <summary>
-  ///   Downloads content from a URL and saves it to a file.
+  ///   Downloads content from a URL and saves it to a file, unless the content holds fewer entries than
+  ///   a minimum entry count above 0 (then the previous file is kept and a warning is logged).
   /// </summary>
-  private async Task DownloadAndSaveAsync(
+  /// <returns><c>true</c> when the destination file was replaced by the download.</returns>
+  private async Task<bool> DownloadAndSaveAsync(
     HttpClient client,
     string url,
     string filePath,
     string description,
+    int minimumEntryCount,
     CancellationToken ct)
   {
     try
     {
       var content = await client.GetStringAsync(url, ct);
-      await File.WriteAllTextAsync(filePath, content, ct);
+
+      // Counted over the loader's own line breaks (\n, \r\n and a bare \r) and parser.
+      using var contentReader = new StringReader(content);
+      var downloadedEntryCount = DisposableEmailDomainChecker.ParseDomainsFromTextReader(contentReader).Count;
+
+      if (downloadedEntryCount < minimumEntryCount)
+      {
+        _logger.LogWarning(
+          "Downloaded {Description} from {Url} holds {DownloadedEntryCount} entries, below the minimum of {MinimumEntryCount}; the previous file is kept",
+          description,
+          url,
+          downloadedEntryCount,
+          minimumEntryCount);
+
+        return false;
+      }
+
+      // Written beside the destination, then renamed over it, so an interrupted write never shortens the destination.
+      var temporaryFilePath = filePath + DownloadTemporaryFileSuffix;
+
+      try
+      {
+        await File.WriteAllTextAsync(temporaryFilePath, content, ct);
+        File.Move(temporaryFilePath, filePath, overwrite: true);
+      }
+      catch
+      {
+        DeleteTemporaryFileKeepingTheOriginalFailure(temporaryFilePath);
+
+        throw;
+      }
 
       _logger.LogDebug("Downloaded {Description}: {Path}", description, filePath);
+
+      return true;
     }
-    catch (HttpRequestException ex)
+    catch (Exception ex) when (ex is HttpRequestException || (ex is OperationCanceledException && !ct.IsCancellationRequested))
     {
+      // An OperationCanceledException while ct is not cancelled is treated as HttpClient's own timeout.
       _logger.LogWarning(
         ex,
         "Failed to download {Description} from {Url}",
@@ -210,6 +239,23 @@ public sealed class BlocklistUpdater : BackgroundService
 
       // Don't fail the entire update if a single custom URL fails.
       // The primary lists and other custom lists may still succeed.
+      return false;
+    }
+  }
+
+
+  /// <summary>
+  ///   Deletes a download's temporary file after its write or move failed. A deletion that fails too is
+  ///   swallowed, so the caller rethrows the write or move failure; the next cycle overwrites the leftover file.
+  /// </summary>
+  private static void DeleteTemporaryFileKeepingTheOriginalFailure(string temporaryFilePath)
+  {
+    try
+    {
+      File.Delete(temporaryFilePath);
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+    {
     }
   }
 

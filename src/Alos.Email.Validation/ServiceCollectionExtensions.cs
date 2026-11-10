@@ -59,6 +59,9 @@ public static class ServiceCollectionExtensions
     services.AddSingleton<IMxRecordValidator, MxRecordValidator>();
     services.AddSingleton<IEmailValidationService, EmailValidationService>();
 
+    // Aborts the host start below EmailValidationOptions.MinimumBlocklistEntryCount (no check when it is 0).
+    services.AddHostedService<BlocklistMinimumEntryCountStartupCheck>();
+
     return services;
   }
 
@@ -75,8 +78,9 @@ public static class ServiceCollectionExtensions
   ///     periodically downloads the latest blocklists from GitHub.
   ///   </para>
   ///   <para>
-  ///     Requires <see cref="EmailValidationOptions.BlocklistDirectory"/> to be configured
-  ///     and <see cref="EmailValidationOptions.EnableAutoUpdate"/> to be true.
+  ///     Requires <see cref="EmailValidationOptions.EnableAutoUpdate"/> to be true. With no
+  ///     <see cref="EmailValidationOptions.BlocklistDirectory"/> configured, the lists are saved to and read from
+  ///     <see cref="EmailValidationOptions.DefaultBlocklistDirectory"/>.
   ///   </para>
   /// </remarks>
   /// <example>

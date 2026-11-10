@@ -344,6 +344,219 @@ public sealed class BlocklistUpdaterIntegrationTests : IDisposable
   #endregion
 
 
+  #region Tests - Download Floor
+
+  [Fact]
+  public async Task BlocklistUpdater_PrimaryBlocklistBelowMinimumEntryCount_KeepsPrimaryBlocklistFile()
+  {
+    // Arrange: A primary blocklist pre-seeded with 5 fresh domains, floor 5, and a served primary of 4 entries
+    // (5 lines, one a comment) beside a served allowlist and one custom blocklist, which carries no floor.
+    var token = Guid.NewGuid().ToString("N");
+    var blocklistDir = _fixture.CreateSubdirectory("updater-floor-below");
+    var primaryBlocklistPath = _fixture.CreateBlocklistFile(
+      blocklistDir,
+      Enumerable.Range(1, 5).Select(i => $"keep-{token}-{i}.com").ToArray());
+    var preSeededPrimaryBlocklistBytes = await File.ReadAllBytesAsync(primaryBlocklistPath);
+
+    var servedPrimaryBlocklist = string.Join(
+      "\n",
+      Enumerable.Range(1, 4).Select(i => $"new-{token}-{i}.com").Prepend("# served list"));
+    var servedPrimaryAllowlist = $"keep-{token}-5.com";
+    var customDomain = $"custom-{token}.com";
+
+    var mockHandler = HttpMockFactory.CreateMockHttpHandlerWithUrlTracking(
+      blocklistContent: servedPrimaryBlocklist,
+      allowlistContent: servedPrimaryAllowlist,
+      customBlocklistContents: [customDomain],
+      customAllowlistContents: [],
+      requestedUrls: []);
+
+    var httpClientFactory = HttpMockFactory.CreateMockHttpClientFactory(mockHandler);
+
+    var options = Options.Create(new EmailValidationOptions
+    {
+      BlocklistDirectory = blocklistDir,
+      EnableAutoUpdate = true,
+      UpdateInterval = TimeSpan.FromHours(1),
+      InitialUpdateDelay = TimeSpan.Zero,
+      BlocklistUrl = "https://example.com/blocklist.conf",
+      AllowlistUrl = "https://example.com/allowlist.conf",
+      CustomBlocklistUrls = ["https://custom.example.com/blocklist.txt"],
+      MinimumBlocklistEntryCount = 5
+    });
+
+    var logger = new Mock<ILogger<BlocklistUpdater>>();
+    var checker = new DisposableEmailDomainChecker(options, Mock.Of<ILogger<DisposableEmailDomainChecker>>());
+    var updater = new BlocklistUpdater(options, httpClientFactory, checker, logger.Object);
+
+    // Act: Run one update cycle.
+    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+    await updater.StartAsync(cts.Token);
+    await Task.Delay(500, cts.Token);
+    await updater.StopAsync(CancellationToken.None);
+
+    // Assert: The primary blocklist file is unchanged and its domains still blocked.
+    (await File.ReadAllBytesAsync(primaryBlocklistPath)).Should().Equal(preSeededPrimaryBlocklistBytes);
+    checker.IsDisposable($"keep-{token}-1.com").Should().BeTrue();
+    checker.IsDisposable($"new-{token}-1.com").Should().BeFalse();
+
+    // Assert: The other lists are written and loaded.
+    (await File.ReadAllTextAsync(Path.Combine(blocklistDir, BlocklistFileNames.PrimaryAllowlist))).Should().Be(servedPrimaryAllowlist);
+    checker.IsDisposable($"keep-{token}-5.com").Should().BeFalse();
+    (await File.ReadAllTextAsync(Path.Combine(blocklistDir, "custom_blocklist_000.conf"))).Should().Be(customDomain);
+    checker.IsDisposable(customDomain).Should().BeTrue();
+
+    // Assert: Exactly one warning from the updater.
+    logger.Verify(
+      l => l.Log(
+        LogLevel.Warning,
+        It.IsAny<EventId>(),
+        It.IsAny<It.IsAnyType>(),
+        It.IsAny<Exception>(),
+        It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+      Times.Once);
+  }
+
+
+  [Theory]
+  [InlineData(5)]
+  [InlineData(6)]
+  public async Task BlocklistUpdater_PrimaryBlocklistAtOrAboveMinimumEntryCount_WritesAndLoads(int servedEntryCount)
+  {
+    // Arrange: A primary blocklist pre-seeded with 5 fresh domains, floor 5, and a served primary at or above it.
+    var token = Guid.NewGuid().ToString("N");
+    var blocklistDir = _fixture.CreateSubdirectory("updater-floor-at-or-above");
+    var preSeededDomains = Enumerable.Range(1, 5).Select(i => $"keep-{token}-{i}.com").ToArray();
+    var primaryBlocklistPath = _fixture.CreateBlocklistFile(blocklistDir, preSeededDomains);
+
+    var servedDomains = Enumerable.Range(1, servedEntryCount).Select(i => $"new-{token}-{i}.com").ToArray();
+    var servedPrimaryBlocklist = string.Join("\n", servedDomains);
+
+    var mockHandler = HttpMockFactory.CreateMockHttpHandlerWithUrlTracking(
+      blocklistContent: servedPrimaryBlocklist,
+      allowlistContent: "",
+      customBlocklistContents: [],
+      customAllowlistContents: [],
+      requestedUrls: []);
+
+    var httpClientFactory = HttpMockFactory.CreateMockHttpClientFactory(mockHandler);
+
+    var options = Options.Create(new EmailValidationOptions
+    {
+      BlocklistDirectory = blocklistDir,
+      EnableAutoUpdate = true,
+      UpdateInterval = TimeSpan.FromHours(1),
+      InitialUpdateDelay = TimeSpan.Zero,
+      BlocklistUrl = "https://example.com/blocklist.conf",
+      AllowlistUrl = "https://example.com/allowlist.conf",
+      MinimumBlocklistEntryCount = 5
+    });
+
+    var checker = new DisposableEmailDomainChecker(options, Mock.Of<ILogger<DisposableEmailDomainChecker>>());
+    var updater = new BlocklistUpdater(options, httpClientFactory, checker, Mock.Of<ILogger<BlocklistUpdater>>());
+
+    // Act: Run one update cycle.
+    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+    await updater.StartAsync(cts.Token);
+    await Task.Delay(500, cts.Token);
+    await updater.StopAsync(CancellationToken.None);
+
+    // Assert: The file holds the served body, the served domains are blocked and none of the pre-seeded ones is.
+    (await File.ReadAllTextAsync(primaryBlocklistPath)).Should().Be(servedPrimaryBlocklist);
+    servedDomains.Should().OnlyContain(domain => checker.IsDisposable(domain));
+    preSeededDomains.Should().NotContain(domain => checker.IsDisposable(domain));
+
+    // Assert: The embedded list is merged into the reloaded lists.
+    checker.IsDisposable("mailinator.com").Should().BeTrue();
+
+    // Assert: The directory holds the two primary list files and no other file.
+    Directory.GetFiles(blocklistDir).Select(Path.GetFileName).Should()
+      .BeEquivalentTo(BlocklistFileNames.PrimaryBlocklist, BlocklistFileNames.PrimaryAllowlist);
+  }
+
+
+  [Theory]
+  [InlineData(true)]  // Five entries joined by a bare carriage return: written.
+  [InlineData(false)] // Five line-feed lines the loader reads as one entry and five comments: kept.
+  public async Task BlocklistUpdater_PrimaryBlocklistEntriesCountedAsTheLoaderReadsLines(bool servedAsFiveCarriageReturnEntries)
+  {
+    // Arrange: A primary blocklist pre-seeded with 5 fresh domains, floor 5, a served primary whose entry count
+    // depends on reading a bare carriage return as a line break, and one custom blocklist requested after it.
+    var token = Guid.NewGuid().ToString("N");
+    var customDomain = $"custom-{token}.com";
+    var blocklistDir = _fixture.CreateSubdirectory("updater-floor-line-breaks");
+    var primaryBlocklistPath = _fixture.CreateBlocklistFile(
+      blocklistDir,
+      Enumerable.Range(1, 5).Select(i => $"keep-{token}-{i}.com").ToArray());
+    var preSeededPrimaryBlocklistBytes = await File.ReadAllBytesAsync(primaryBlocklistPath);
+
+    var servedPrimaryBlocklist = servedAsFiveCarriageReturnEntries
+      ? string.Join("\r", Enumerable.Range(1, 5).Select(i => $"cr-{token}-{i}.com"))
+      : string.Join("\n", Enumerable.Range(1, 5).Select(i => $"same-{token}.example\r# comment {i}"));
+
+    var mockHandler = HttpMockFactory.CreateMockHttpHandlerWithUrlTracking(
+      blocklistContent: servedPrimaryBlocklist,
+      allowlistContent: "",
+      customBlocklistContents: [customDomain],
+      customAllowlistContents: [],
+      requestedUrls: []);
+
+    var httpClientFactory = HttpMockFactory.CreateMockHttpClientFactory(mockHandler);
+
+    var options = Options.Create(new EmailValidationOptions
+    {
+      BlocklistDirectory = blocklistDir,
+      EnableAutoUpdate = true,
+      UpdateInterval = TimeSpan.FromHours(1),
+      InitialUpdateDelay = TimeSpan.Zero,
+      BlocklistUrl = "https://example.com/blocklist.conf",
+      AllowlistUrl = "https://example.com/allowlist.conf",
+      CustomBlocklistUrls = ["https://custom.example.com/blocklist.txt"],
+      MinimumBlocklistEntryCount = 5
+    });
+
+    var logger = new Mock<ILogger<BlocklistUpdater>>();
+    var checker = new DisposableEmailDomainChecker(options, Mock.Of<ILogger<DisposableEmailDomainChecker>>());
+    var updater = new BlocklistUpdater(options, httpClientFactory, checker, logger.Object);
+
+    // Act: Run one update cycle.
+    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+    await updater.StartAsync(cts.Token);
+    await Task.Delay(500, cts.Token);
+    await updater.StopAsync(CancellationToken.None);
+
+    // Assert: In both legs the cycle goes on to the custom list and reloads the checker.
+    checker.IsDisposable(customDomain).Should().BeTrue();
+
+    if (servedAsFiveCarriageReturnEntries)
+    {
+      // Assert: Five entries counted, so the file holds the served body and replaces the pre-seeded domains.
+      (await File.ReadAllTextAsync(primaryBlocklistPath)).Should().Be(servedPrimaryBlocklist);
+      checker.IsDisposable($"cr-{token}-1.com").Should().BeTrue();
+      checker.IsDisposable($"keep-{token}-1.com").Should().BeFalse();
+
+      return;
+    }
+
+    // Assert: One entry counted, so the pre-seeded file is kept and one warning is logged.
+    (await File.ReadAllBytesAsync(primaryBlocklistPath)).Should().Equal(preSeededPrimaryBlocklistBytes);
+    Enumerable.Range(1, 5).Should().OnlyContain(i => checker.IsDisposable($"keep-{token}-{i}.com"));
+    logger.Verify(
+      l => l.Log(
+        LogLevel.Warning,
+        It.IsAny<EventId>(),
+        It.IsAny<It.IsAnyType>(),
+        It.IsAny<Exception>(),
+        It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+      Times.Once);
+  }
+
+  #endregion
+
+
   #region Tests - Configuration Behavior
 
   [Fact]
@@ -568,6 +781,147 @@ public sealed class BlocklistUpdaterIntegrationTests : IDisposable
 
     // Assert: Checker should have primary blocklist domains.
     checker.IsDisposable("primary-blocked.com").Should().BeTrue();
+  }
+
+
+  [Fact]
+  public async Task BlocklistUpdater_DownloadTimeout_WritesOtherListsAndReloads()
+  {
+    // Arrange: The primary allowlist's request times out as HttpClient's own timeout does, while the primary
+    // blocklist and one custom blocklist, requested before and after it, serve fresh domains.
+    var token = Guid.NewGuid().ToString("N");
+    var blocklistDir = _fixture.CreateSubdirectory("updater-download-timeout");
+    var primaryDomain = $"new-{token}.com";
+    var customDomain = $"custom-{token}.com";
+    var requestedUrls = new List<string>();
+
+    var mockHandler = HttpMockFactory.CreateMockHttpHandlerWithUrlTracking(
+      blocklistContent: primaryDomain,
+      allowlistContent: "",
+      customBlocklistContents: [customDomain],
+      customAllowlistContents: [],
+      requestedUrls: requestedUrls,
+      exceptionsByUrl: new Dictionary<string, Exception>
+      {
+        ["https://example.com/allowlist.conf"] = new TaskCanceledException(
+          "The request was canceled due to the configured HttpClient.Timeout.",
+          new TimeoutException())
+      });
+
+    var httpClientFactory = HttpMockFactory.CreateMockHttpClientFactory(mockHandler);
+
+    var options = Options.Create(new EmailValidationOptions
+    {
+      BlocklistDirectory = blocklistDir,
+      EnableAutoUpdate = true,
+      UpdateInterval = TimeSpan.FromHours(1),
+      InitialUpdateDelay = TimeSpan.Zero,
+      BlocklistUrl = "https://example.com/blocklist.conf",
+      AllowlistUrl = "https://example.com/allowlist.conf",
+      CustomBlocklistUrls = ["https://custom.example.com/blocklist.txt"]
+    });
+
+    var logger = new Mock<ILogger<BlocklistUpdater>>();
+    var checker = new DisposableEmailDomainChecker(options, Mock.Of<ILogger<DisposableEmailDomainChecker>>());
+    var updater = new BlocklistUpdater(options, httpClientFactory, checker, logger.Object);
+
+    // Act: Run one update cycle.
+    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+    await updater.StartAsync(cts.Token);
+    await Task.Delay(500, cts.Token);
+    await updater.StopAsync(CancellationToken.None);
+
+    // Assert: The custom list is requested after the timeout, and both lists are written and loaded in the same cycle.
+    requestedUrls.Should().ContainInOrder(
+      "https://example.com/blocklist.conf",
+      "https://example.com/allowlist.conf",
+      "https://custom.example.com/blocklist.txt");
+    (await File.ReadAllTextAsync(Path.Combine(blocklistDir, BlocklistFileNames.PrimaryBlocklist))).Should().Be(primaryDomain);
+    (await File.ReadAllTextAsync(Path.Combine(blocklistDir, "custom_blocklist_000.conf"))).Should().Be(customDomain);
+    checker.IsDisposable(primaryDomain).Should().BeTrue();
+    checker.IsDisposable(customDomain).Should().BeTrue();
+
+    // Assert: Exactly one warning from the updater.
+    logger.Verify(
+      l => l.Log(
+        LogLevel.Warning,
+        It.IsAny<EventId>(),
+        It.IsAny<It.IsAnyType>(),
+        It.IsAny<Exception>(),
+        It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+      Times.Once);
+  }
+
+
+  [Fact]
+  public async Task BlocklistUpdater_PrimaryBlocklistThatCannotBeSaved_KeepsPrimaryBlocklistFile()
+  {
+    // Arrange: A primary blocklist pre-seeded with 5 fresh domains, and a directory standing at the path of the
+    // download's temporary file, so the served primary blocklist cannot be saved.
+    var token = Guid.NewGuid().ToString("N");
+    var blocklistDir = _fixture.CreateSubdirectory("updater-save-failure");
+    var primaryBlocklistPath = _fixture.CreateBlocklistFile(
+      blocklistDir,
+      Enumerable.Range(1, 5).Select(i => $"keep-{token}-{i}.com").ToArray());
+    var preSeededPrimaryBlocklistBytes = await File.ReadAllBytesAsync(primaryBlocklistPath);
+
+    Directory.CreateDirectory(primaryBlocklistPath + ".download");
+
+    var mockHandler = HttpMockFactory.CreateMockHttpHandlerWithUrlTracking(
+      blocklistContent: $"new-{token}-1.com",
+      allowlistContent: "",
+      customBlocklistContents: [],
+      customAllowlistContents: [],
+      requestedUrls: []);
+
+    var httpClientFactory = HttpMockFactory.CreateMockHttpClientFactory(mockHandler);
+
+    var options = Options.Create(new EmailValidationOptions
+    {
+      BlocklistDirectory = blocklistDir,
+      EnableAutoUpdate = true,
+      UpdateInterval = TimeSpan.FromHours(1),
+      InitialUpdateDelay = TimeSpan.Zero,
+      BlocklistUrl = "https://example.com/blocklist.conf",
+      AllowlistUrl = "https://example.com/allowlist.conf"
+    });
+
+    var logger = new Mock<ILogger<BlocklistUpdater>>();
+    var checker = new DisposableEmailDomainChecker(options, Mock.Of<ILogger<DisposableEmailDomainChecker>>());
+    var updater = new BlocklistUpdater(options, httpClientFactory, checker, logger.Object);
+
+    // Act: Run one update cycle.
+    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+    await updater.StartAsync(cts.Token);
+    await Task.Delay(500, cts.Token);
+    await updater.StopAsync(CancellationToken.None);
+
+    // Assert: The primary blocklist file is unchanged and its domains still blocked.
+    (await File.ReadAllBytesAsync(primaryBlocklistPath)).Should().Equal(preSeededPrimaryBlocklistBytes);
+    Enumerable.Range(1, 5).Should().OnlyContain(i => checker.IsDisposable($"keep-{token}-{i}.com"));
+    checker.IsDisposable($"new-{token}-1.com").Should().BeFalse();
+
+    // Assert: Exactly one warning from the updater, carrying the failure of the save itself: deleting the directory
+    // that stands at the temporary file's path fails with the same exception types, told apart by the stack trace.
+    logger.Verify(
+      l => l.Log(
+        LogLevel.Warning,
+        It.IsAny<EventId>(),
+        It.IsAny<It.IsAnyType>(),
+        It.Is<Exception>(ex =>
+          (ex is UnauthorizedAccessException || ex is IOException) && !ex.StackTrace!.Contains("Delete")),
+        It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+      Times.Once);
+    logger.Verify(
+      l => l.Log(
+        LogLevel.Warning,
+        It.IsAny<EventId>(),
+        It.IsAny<It.IsAnyType>(),
+        It.IsAny<Exception>(),
+        It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+      Times.Once);
   }
 
   #endregion

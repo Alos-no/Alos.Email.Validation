@@ -6,12 +6,21 @@ namespace Alos.Email.Validation;
 /// <remarks>
 ///   <para>
 ///     Implementations of this interface may implement <see cref="IDisposable"/>. If so,
-///     calling <see cref="IsDisposable"/> or <see cref="ReloadFromDisk"/> after disposal
-///     will throw <see cref="ObjectDisposedException"/>.
+///     calling <see cref="IsDisposable"/>, <see cref="ReloadFromDisk"/> or reading
+///     <see cref="BlockedDomainCount"/> after disposal will throw <see cref="ObjectDisposedException"/>.
 ///   </para>
 /// </remarks>
 public interface IDisposableEmailDomainChecker
 {
+  /// <summary>
+  ///   Gets the number of entries in the loaded blocked set: the embedded list, the directory's files and the
+  ///   configured custom blocklist entries merged, counted before the allowlist is applied. Added in 1.4.0.
+  /// </summary>
+  /// <exception cref="ObjectDisposedException">
+  ///   Thrown if the checker has been disposed (for implementations that support disposal).
+  /// </exception>
+  int BlockedDomainCount { get; }
+
   /// <summary>
   ///   Checks if a domain is a known disposable email provider.
   /// </summary>
@@ -26,7 +35,8 @@ public interface IDisposableEmailDomainChecker
   bool IsDisposable(string? domain);
 
   /// <summary>
-  ///   Reloads blocklists from disk. Called by BlocklistUpdater after download.
+  ///   Reloads blocklists, starting from the embedded lists and merging the directory's files into them.
+  ///   Called by BlocklistUpdater after download.
   /// </summary>
   /// <param name="directory">The directory containing the blocklist files.</param>
   /// <exception cref="ObjectDisposedException">

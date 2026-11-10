@@ -63,20 +63,20 @@ public sealed class EmailValidationOptions
   #region Properties & Fields - Public
 
   /// <summary>
-  ///   Gets or sets the path to directory containing blocklist files.
-  ///   If null, uses embedded resources only.
+  ///   Gets or sets the path to directory containing blocklist files. When null or empty, the directory in use is the
+  ///   one <see cref="ResolveBlocklistDirectory"/> returns.
   /// </summary>
   /// <remarks>
   ///   <para>
   ///     When <see cref="EnableAutoUpdate"/> is true, downloaded blocklists are saved here.
-  ///     All blocklist and allowlist files in this directory are loaded and merged at startup and on reload.
+  ///     All blocklist and allowlist files in this directory are merged into the embedded lists at startup and on reload.
   ///   </para>
   /// </remarks>
   public string? BlocklistDirectory { get; set; }
 
   /// <summary>
   ///   Gets or sets whether automatic blocklist updates from remote URLs are enabled.
-  ///   Requires <see cref="BlocklistDirectory"/> to be set.
+  ///   With no <see cref="BlocklistDirectory"/> set, the lists are saved to and read from <see cref="DefaultBlocklistDirectory"/>.
   /// </summary>
   public bool EnableAutoUpdate { get; set; } = false;
 
@@ -109,6 +109,13 @@ public sealed class EmailValidationOptions
   /// </summary>
   public string AllowlistUrl { get; set; } =
     "https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/master/allowlist.conf";
+
+  /// <summary>
+  ///   Gets or sets the floor compared with the entries of a downloaded primary blocklist (a shorter download is
+  ///   not written) and with the checker's loaded blocked set at host start (a smaller set aborts the start).
+  ///   Default: 0, which means no check.
+  /// </summary>
+  public int MinimumBlocklistEntryCount { get; set; }
 
   /// <summary>
   ///   Gets or sets additional URLs for custom blocklists.
@@ -173,6 +180,30 @@ public sealed class EmailValidationOptions
   ///   </para>
   /// </remarks>
   public List<string> WhitelistedMxDomains { get; set; } = [];
+
+  #endregion
+
+
+  #region Methods - Public
+
+  /// <summary>
+  ///   Returns the directory blocklist files are read from and, with auto-update on, saved to:
+  ///   <see cref="BlocklistDirectory"/> when set, else <see cref="DefaultBlocklistDirectory"/> when
+  ///   <see cref="EnableAutoUpdate"/> is true, else null (the embedded lists alone are loaded).
+  /// </summary>
+  /// <remarks>
+  ///   <para>
+  ///     The checker and the updater both call this, so the files one start saved are the files the next start loads
+  ///     and compares against <see cref="MinimumBlocklistEntryCount"/>.
+  ///   </para>
+  /// </remarks>
+  public string? ResolveBlocklistDirectory()
+  {
+    if (!string.IsNullOrEmpty(BlocklistDirectory))
+      return BlocklistDirectory;
+
+    return EnableAutoUpdate ? DefaultBlocklistDirectory : null;
+  }
 
   #endregion
 }

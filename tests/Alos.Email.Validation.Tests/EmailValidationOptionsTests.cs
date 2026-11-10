@@ -50,6 +50,49 @@ public sealed class EmailValidationOptionsTests
   #endregion
 
 
+  #region Tests - ResolveBlocklistDirectory
+
+  [Theory]
+  [InlineData(true)]
+  [InlineData(false)]
+  public void ResolveBlocklistDirectory_ConfiguredDirectory_ReturnsItWhateverAutoUpdateIs(bool enableAutoUpdate)
+  {
+    // Arrange
+    var options = new EmailValidationOptions { BlocklistDirectory = "/var/lib/alos/email-blocklists", EnableAutoUpdate = enableAutoUpdate };
+
+    // Act & Assert
+    options.ResolveBlocklistDirectory().Should().Be("/var/lib/alos/email-blocklists");
+  }
+
+
+  [Theory]
+  [InlineData(null)]
+  [InlineData("")]
+  public void ResolveBlocklistDirectory_NoDirectoryWithAutoUpdate_ReturnsTheDefaultDirectory(string? blocklistDirectory)
+  {
+    // Arrange: the updater saves here, so the checker must read the same directory at start.
+    var options = new EmailValidationOptions { BlocklistDirectory = blocklistDirectory, EnableAutoUpdate = true };
+
+    // Act & Assert
+    options.ResolveBlocklistDirectory().Should().Be(EmailValidationOptions.DefaultBlocklistDirectory);
+  }
+
+
+  [Theory]
+  [InlineData(null)]
+  [InlineData("")]
+  public void ResolveBlocklistDirectory_NoDirectoryWithoutAutoUpdate_ReturnsNull(string? blocklistDirectory)
+  {
+    // Arrange: nothing writes a directory, so the embedded lists are the only source.
+    var options = new EmailValidationOptions { BlocklistDirectory = blocklistDirectory, EnableAutoUpdate = false };
+
+    // Act & Assert
+    options.ResolveBlocklistDirectory().Should().BeNull();
+  }
+
+  #endregion
+
+
   #region Tests - Default Values
 
   [Fact]

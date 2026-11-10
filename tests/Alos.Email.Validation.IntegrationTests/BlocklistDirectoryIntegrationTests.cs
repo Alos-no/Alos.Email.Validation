@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Tests.Shared.Fixtures;
+using Tests.Shared.TestHelpers;
 
 /// <summary>
 ///   Integration tests for disk-based blocklist directory loading.
@@ -61,7 +62,7 @@ public sealed class BlocklistDirectoryIntegrationTests : IDisposable
     checker.IsDisposable("disk-allowed-1.com").Should().BeFalse();
 
     // Non-listed domain should NOT be detected
-    // (note: when using disk-based lists, embedded resources are not loaded).
+    // (note: the directory's lists are merged into the embedded lists, which hold no such domain).
     checker.IsDisposable("random-unknown.xyz").Should().BeFalse();
   }
 
@@ -79,9 +80,9 @@ public sealed class BlocklistDirectoryIntegrationTests : IDisposable
     var logger = Mock.Of<ILogger<DisposableEmailDomainChecker>>();
     var checker = new DisposableEmailDomainChecker(options, logger);
 
-    // Act & Assert: Should fall back gracefully - empty sets loaded.
-    // Since no files exist, blocklist is empty, so nothing is blocked.
-    checker.IsDisposable("mailinator.com").Should().BeFalse();
+    // Act & Assert: The embedded lists are always loaded; the empty directory adds nothing to them.
+    // An embedded domain is blocked, a non-listed domain is not.
+    checker.IsDisposable("mailinator.com").Should().BeTrue();
     checker.IsDisposable("random-domain.com").Should().BeFalse();
   }
 
@@ -127,6 +128,76 @@ public sealed class BlocklistDirectoryIntegrationTests : IDisposable
     // Act & Assert: Should fall back to embedded resources.
     checker.IsDisposable("mailinator.com").Should().BeTrue();
     checker.IsDisposable("gmail.com").Should().BeFalse();
+  }
+
+  #endregion
+
+
+  #region Tests - Embedded List Merge
+
+  [Fact]
+  public void IsDisposable_BlocklistDirectory_SmallerThanEmbedded_BlocksBothLists()
+  {
+    // Arrange: A directory primary blocklist of 3 fresh domains, shorter than the embedded list.
+    var token = Guid.NewGuid().ToString("N");
+    var directoryDomains = Enumerable.Range(1, 3).Select(i => $"dir-{token}-{i}.com").ToArray();
+    var blocklistDir = _fixture.CreateSubdirectory("merge-smaller");
+    _fixture.CreateBlocklistFile(blocklistDir, directoryDomains);
+
+    var options = Options.Create(new EmailValidationOptions
+    {
+      BlocklistDirectory = blocklistDir
+    });
+    var checker = new DisposableEmailDomainChecker(options, Mock.Of<ILogger<DisposableEmailDomainChecker>>());
+
+    // Act & Assert: The directory's domains and every embedded domain are blocked.
+    directoryDomains.Should().OnlyContain(domain => checker.IsDisposable(domain));
+    EmbeddedBlocklistReader.ReadEmbeddedBlocklistDomains().Should().OnlyContain(domain => checker.IsDisposable(domain));
+    checker.IsDisposable("gmail.com").Should().BeFalse();
+  }
+
+
+  [Fact]
+  public void IsDisposable_BlocklistDirectory_LargerThanEmbedded_BlocksBothLists()
+  {
+    // Arrange: A directory primary blocklist of E + 1 fresh domains, longer than the embedded list.
+    var embeddedDomains = EmbeddedBlocklistReader.ReadEmbeddedBlocklistDomains();
+    var token = Guid.NewGuid().ToString("N");
+    var directoryDomains = Enumerable.Range(1, embeddedDomains.Count + 1).Select(i => $"dir-{token}-{i}.com").ToArray();
+    var blocklistDir = _fixture.CreateSubdirectory("merge-larger");
+    _fixture.CreateBlocklistFile(blocklistDir, directoryDomains);
+
+    var options = Options.Create(new EmailValidationOptions
+    {
+      BlocklistDirectory = blocklistDir
+    });
+    var checker = new DisposableEmailDomainChecker(options, Mock.Of<ILogger<DisposableEmailDomainChecker>>());
+
+    // Act & Assert: Every directory domain and every embedded domain is blocked.
+    directoryDomains.Should().OnlyContain(domain => checker.IsDisposable(domain));
+    embeddedDomains.Should().OnlyContain(domain => checker.IsDisposable(domain));
+  }
+
+
+  [Fact]
+  public void IsDisposable_DirectoryAllowlist_OverridesEmbeddedEntry()
+  {
+    // Arrange: A directory primary blocklist of one fresh domain beside an allowlist naming an embedded entry.
+    var directoryDomain = $"dir-{Guid.NewGuid():N}.com";
+    var blocklistDir = _fixture.CreateSubdirectory("merge-allowlist");
+    _fixture.CreateBlocklistFile(blocklistDir, directoryDomain);
+    _fixture.CreateAllowlistFile(blocklistDir, "mailinator.com");
+
+    var options = Options.Create(new EmailValidationOptions
+    {
+      BlocklistDirectory = blocklistDir
+    });
+    var checker = new DisposableEmailDomainChecker(options, Mock.Of<ILogger<DisposableEmailDomainChecker>>());
+
+    // Act & Assert: The directory allowlist overrides the embedded entry; the other lists still block.
+    checker.IsDisposable("mailinator.com").Should().BeFalse();
+    checker.IsDisposable("yopmail.com").Should().BeTrue();
+    checker.IsDisposable(directoryDomain).Should().BeTrue();
   }
 
   #endregion

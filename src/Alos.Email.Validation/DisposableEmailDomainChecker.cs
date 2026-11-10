@@ -6,7 +6,8 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 ///   Checks if an email domain is a known disposable/temporary email provider.
-///   Uses embedded blocklist from disposable-email-domains (~38,000 domains).
+///   Starts from the embedded starter list of the disposable-email-domains list, merged with the
+///   files of the configured blocklist directory (where the auto-updater saves the full list).
 /// </summary>
 /// <remarks>
 ///   <para>
@@ -14,8 +15,10 @@ using Microsoft.Extensions.Options;
 ///     Uses reader-writer lock for thread-safe access during reloads.
 ///   </para>
 ///   <para>
-///     When loading from disk, all files matching the blocklist/allowlist naming
-///     conventions are loaded and merged together. This includes:
+///     The embedded blocklist and allowlist are always loaded. When loading from disk, all files
+///     matching the blocklist/allowlist naming conventions are merged into them, at construction
+///     and at each reload, so a directory that is empty or truncated never loads fewer entries
+///     than the package ships. This includes:
 ///     - Primary: disposable_email_blocklist.conf, disposable_email_allowlist.conf
 ///     - Custom: custom_blocklist_*.conf, custom_allowlist_*.conf
 ///   </para>
@@ -56,13 +59,13 @@ public sealed class DisposableEmailDomainChecker : IDisposableEmailDomainChecker
     _logger = logger;
     _options = options.Value;
 
-    // Load base lists from disk or embedded resources.
-    var diskDirectory = _options.BlocklistDirectory;
+    // Load the embedded lists, merged with the directory's files when the directory exists.
+    var diskDirectory = _options.ResolveBlocklistDirectory();
 
     if (!string.IsNullOrEmpty(diskDirectory) && Directory.Exists(diskDirectory))
     {
-      _logger.LogInformation("Loading blocklists from disk: {Directory}", diskDirectory);
-      (_blockedDomains, _allowlist) = LoadFromDisk(diskDirectory);
+      _logger.LogInformation("Loading embedded blocklists merged with the files of: {Directory}", diskDirectory);
+      (_blockedDomains, _allowlist) = LoadEmbeddedListsMergedWithDirectoryFiles(diskDirectory);
     }
     else
     {
@@ -77,6 +80,32 @@ public sealed class DisposableEmailDomainChecker : IDisposableEmailDomainChecker
       "Loaded {BlocklistCount} blocked domains and {AllowlistCount} allowlisted domains (including custom)",
       _blockedDomains.Count,
       _allowlist.Count);
+  }
+
+  #endregion
+
+
+  #region Properties - Public
+
+  /// <inheritdoc />
+  /// <exception cref="ObjectDisposedException">Thrown if the instance has been disposed.</exception>
+  public int BlockedDomainCount
+  {
+    get
+    {
+      ObjectDisposedException.ThrowIf(_disposed, this);
+
+      _lock.EnterReadLock();
+
+      try
+      {
+        return _blockedDomains.Count;
+      }
+      finally
+      {
+        _lock.ExitReadLock();
+      }
+    }
   }
 
   #endregion
@@ -118,7 +147,7 @@ public sealed class DisposableEmailDomainChecker : IDisposableEmailDomainChecker
 
     _logger.LogInformation("Reloading blocklists from disk: {Directory}", directory);
 
-    var (newBlocklist, newAllowlist) = LoadFromDisk(directory);
+    var (newBlocklist, newAllowlist) = LoadEmbeddedListsMergedWithDirectoryFiles(directory);
 
     // Merge inline custom lists into the newly loaded base lists.
     MergeInlineCustomLists(_options, newBlocklist, newAllowlist);
@@ -195,12 +224,16 @@ public sealed class DisposableEmailDomainChecker : IDisposableEmailDomainChecker
 
 
   /// <summary>
-  ///   Loads all blocklist and allowlist files from disk and merges them.
+  ///   Loads the embedded blocklist and allowlist and merges every blocklist and allowlist file of the directory into them.
   /// </summary>
-  private (HashSet<string> Blocklist, HashSet<string> Allowlist) LoadFromDisk(string directory)
+  /// <exception cref="DirectoryNotFoundException">Thrown if the directory does not exist.</exception>
+  private (HashSet<string> Blocklist, HashSet<string> Allowlist) LoadEmbeddedListsMergedWithDirectoryFiles(string directory)
   {
-    var blocklist = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    var allowlist = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var (blocklist, allowlist) = LoadFromEmbeddedResources();
+
+    // The primary files read from the directory (0 when absent), for the closing debug log.
+    var primaryBlocklistFileReadCount = 0;
+    var primaryAllowlistFileReadCount = 0;
 
     // Load primary blocklist if it exists.
     var primaryBlocklistPath = Path.Combine(directory, BlocklistFileNames.PrimaryBlocklist);
@@ -209,6 +242,7 @@ public sealed class DisposableEmailDomainChecker : IDisposableEmailDomainChecker
     {
       var domains = LoadDomainsFromFile(primaryBlocklistPath);
       blocklist.UnionWith(domains);
+      primaryBlocklistFileReadCount = 1;
 
       _logger.LogDebug("Loaded {Count} domains from primary blocklist", domains.Count);
     }
@@ -220,6 +254,7 @@ public sealed class DisposableEmailDomainChecker : IDisposableEmailDomainChecker
     {
       var domains = LoadDomainsFromFile(primaryAllowlistPath);
       allowlist.UnionWith(domains);
+      primaryAllowlistFileReadCount = 1;
 
       _logger.LogDebug("Loaded {Count} domains from primary allowlist", domains.Count);
     }
@@ -247,11 +282,11 @@ public sealed class DisposableEmailDomainChecker : IDisposableEmailDomainChecker
     }
 
     _logger.LogDebug(
-      "Loaded from disk: {BlocklistCount} blocked domains ({BlocklistFiles} files), {AllowlistCount} allowed domains ({AllowlistFiles} files)",
+      "Loaded embedded lists merged with directory files: {BlocklistCount} blocked domains ({BlocklistFiles} files), {AllowlistCount} allowed domains ({AllowlistFiles} files)",
       blocklist.Count,
-      1 + customBlocklistFiles.Length,
+      primaryBlocklistFileReadCount + customBlocklistFiles.Length,
       allowlist.Count,
-      1 + customAllowlistFiles.Length);
+      primaryAllowlistFileReadCount + customAllowlistFiles.Length);
 
     return (blocklist, allowlist);
   }
@@ -298,6 +333,16 @@ public sealed class DisposableEmailDomainChecker : IDisposableEmailDomainChecker
 
     using var reader = new StreamReader(stream);
 
+    return ParseDomainsFromTextReader(reader);
+  }
+
+
+  /// <summary>
+  ///   Parses the domains a TextReader holds, over the line breaks <see cref="File.ReadLines(string)"/> recognizes.
+  ///   The updater counts a download's entries through it, so a download is counted as the loader will read its file.
+  /// </summary>
+  internal static HashSet<string> ParseDomainsFromTextReader(TextReader reader)
+  {
     return ParseDomainLines(ReadLines(reader));
   }
 
@@ -326,11 +371,11 @@ public sealed class DisposableEmailDomainChecker : IDisposableEmailDomainChecker
 
 
   /// <summary>
-  ///   Reads all lines from a StreamReader as an enumerable.
+  ///   Reads all lines from a TextReader as an enumerable, ending a line where <see cref="File.ReadLines(string)"/> does.
   /// </summary>
-  /// <param name="reader">The StreamReader to read from.</param>
+  /// <param name="reader">The TextReader to read from.</param>
   /// <returns>An enumerable of lines.</returns>
-  private static IEnumerable<string> ReadLines(StreamReader reader)
+  private static IEnumerable<string> ReadLines(TextReader reader)
   {
     while (reader.ReadLine() is { } line)
     {

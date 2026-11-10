@@ -67,13 +67,15 @@ public static class HttpMockFactory
   /// <param name="customBlocklistContents">Array of content for custom blocklist URLs (by index).</param>
   /// <param name="customAllowlistContents">Array of content for custom allowlist URLs (by index).</param>
   /// <param name="requestedUrls">List to track all requested URLs (populated during test execution).</param>
+  /// <param name="exceptionsByUrl">Exceptions thrown instead of a response, keyed by the exact requested URL.</param>
   /// <returns>A configured HttpMessageHandler mock.</returns>
   public static HttpMessageHandler CreateMockHttpHandlerWithUrlTracking(
     string blocklistContent,
     string allowlistContent,
     string[] customBlocklistContents,
     string[] customAllowlistContents,
-    List<string> requestedUrls)
+    List<string> requestedUrls,
+    IReadOnlyDictionary<string, Exception>? exceptionsByUrl = null)
   {
     var customBlocklistIndex = 0;
     var customAllowlistIndex = 0;
@@ -90,6 +92,11 @@ public static class HttpMockFactory
       {
         var url = request.RequestUri?.ToString() ?? "";
         requestedUrls.Add(url);
+
+        if (exceptionsByUrl is not null && exceptionsByUrl.TryGetValue(url, out var exception))
+        {
+          throw exception;
+        }
 
         string content;
 
